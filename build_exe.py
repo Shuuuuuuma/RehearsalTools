@@ -10,6 +10,13 @@ import os
 import subprocess
 import sys
 
+# GitHub Actions など文字コードが UTF-8 でない環境でも日本語の表示で落ちないように
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 NAME = "GakumasRehearsalTool"
 
