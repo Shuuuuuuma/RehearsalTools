@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pillow
+numpy
+pandas
+opencv-python
+matplotlib
+winocr
+pywin32
+# 任意：Tesseract を使う場合（別途 Tesseract 本体のインストールが必要）
+# pytesseract

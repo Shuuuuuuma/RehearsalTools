@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# exe のビルド成果物
+build/
+dist/
+*.spec
+
+# 個人のデータ（GitHub に上げない）
+automation_config.json
+references/
+sessions/
+data/
+csv/
+backup_before_automation/
+scratch/

@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>学マス リハーサル結果自動集計＆分析ダッシュボード</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+  <style>
+    body {
+      background-color: #f8fafc;
+      color: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    .sheet-table th, .sheet-table td {
+      border: 1px solid #cbd5e1;
+    }
+    .yellow-cell {
+      background-color: #fef08a !important;
+    }
+    .hidden { display: none !important; }
+    .rh-tiles { border-collapse: separate; border-spacing: 6px 0; }
+    .rh-tiles th { font-size: 11px; color: #64748b; font-weight: 600; padding-bottom: 2px; }
+    .rh-tiles td { background: #f1f5f9; border-radius: 10px; padding: 8px 2px; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .rh-tiles .hero { color: #b45309; }
+    .rh-tiles td.hero { background: #fff4e0; }
+    .rh-table th, .rh-table td { border-bottom: 1px solid #eef2f7; padding: 3px 6px; font-variant-numeric: tabular-nums; }
+    .rh-table thead th { position: sticky; top: 0; background: #f8fafc; z-index: 1; text-align: center; }
+    .rh-table td.cell { cursor: pointer; }
+    .rh-table td.cell:hover { background: #eff6ff; }
+    .rh-table td.sel { background: #dbeafe; font-weight: 700; }
+    .rh-table td.flag { background: #fef3c7; }
+    .rh-table td.stage-start { border-left: 2px solid #cbd5e1; }
+    .rh-table input { width: 6.5rem; text-align: right; background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0 2px; }
+    .rh-table input:focus { border-color: #1c8fe8; background: #fff; outline: none; }
+  </style>
+</head>
+<body class="p-3 md:p-5 min-h-screen">
+  <div class="max-w-[1600px] mx-auto space-y-4">
+    
+    <!-- トップコントロールバー -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+          <span>🌸</span> 学マス リハーサル結果スコア分析ダッシュボード
+        </h1>
+        <p class="text-xs text-slate-500">PC版学マス（ウィンドウ: gakumas）からスコアを自動取得し，ステージ別・キャラ別に統計分析を行います．</p>
+        <a href="/automation" class="text-xs font-bold text-pink-700 hover:underline">🤖 リハーサル自動周回ページへ →</a>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- ウィンドウ選択 -->
+        <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs">
+          <span class="font-medium text-slate-600">ウィンドウ:</span>
+          <select id="windowSelect" class="bg-transparent font-medium text-slate-800 focus:outline-none max-w-[200px] truncate">
+            <option value="">検出中...</option>
+          </select>
+          <button onclick="fetchWindows()" title="再検出" class="text-slate-400 hover:text-slate-600 ml-1">🔄</button>
+        </div>
+
+        <!-- キャプチャボタン -->
+        <button id="btnCapture" onclick="captureCurrentWindow()" class="bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm">
+          <span>📸</span> ウィンドウキャプチャ
+        </button>
+
+        <!-- クリップボード貼り付けボタン -->
+        <button onclick="pasteFromClipboard()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-medium text-xs px-3 py-2 rounded-lg transition-colors flex items-center gap-1" title="Win+Shift+S 等で撮ったスクショを即座に読み込み">
+          <span>📋</span> スクショ貼付 (Ctrl+V)
+        </button>
+
+        <a href="/api/export_csv" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-medium text-xs px-3 py-2 rounded-lg transition-colors flex items-center gap-1" title="登録されている全スコアを CSV で保存">
+          <span>💾</span> CSV保存
+        </a>
+
+        <!-- 自動検知スキャナーボタン（新機能！） -->
+        <button id="btnAutoScan" onclick="toggleAutoScan()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm">
+          <span id="scanIndicator" class="inline-block w-2 h-2 rounded-full bg-white"></span>
+          <span id="scanText">🤖 自動検知スキャン: OFF</span>
+        </button>
+
+        <!-- サンプル取り込み -->
+        <button onclick="captureSample()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs px-2.5 py-2 rounded-lg border border-slate-300 transition-colors">
+          🧪 サンプル読込
+        </button>
+      </div>
+    </div>
+
+    <!-- 自動監視ステータスインフォバー -->
+    <div id="autoScanBanner" class="hidden bg-emerald-50 border border-emerald-300 text-emerald-800 px-3.5 py-2 rounded-lg text-xs flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+        <span class="font-bold">【自動検知スキャン実行中】</span>
+        <span id="autoScanMessage">ゲーム画面を監視中... リハーサル結果の数字が切り替わると自動でスキャン・記録されます．</span>
+      </div>
+      <span class="text-xs font-semibold text-emerald-700">自動検知累計: <strong id="autoScanCount" class="text-emerald-900 text-sm">0</strong> 回</span>
+    </div>
+
+    <!-- 重要な注意ガイドバー -->
+    <div class="bg-amber-50 border border-amber-200 text-amber-800 px-3.5 py-2 rounded-lg text-xs flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <span class="text-sm">💡</span>
+        <span><strong>【ヒント】</strong> 「自動検知スキャン」をONにすると，リハーサルを周回するだけで<strong>結果画面の切り替わりを検知して自動でグラフが更新</strong>されます．</span>
+      </div>
+      <button onclick="togglePreviewModal()" class="text-amber-900 underline font-medium hover:text-amber-700 whitespace-nowrap">
+        📷 直近キャプチャ画像を確認
+      </button>
+    </div>
+
+    <!-- リハーサル分析（gktools と同じ表示形式） -->
+    <div id="rehearsalCard" class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-4 relative">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-base font-bold text-slate-800">📊 リハーサル分析</h2>
+          <p class="text-[11px] text-slate-500">右上のボタン・箱ひげ図の箱・表の数字のどれかでキャラを選ぶと，その度数分布を右側に表示します．CSV はこのカードにドロップしても読み込めます．</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span class="font-semibold text-slate-600">データ:</span>
+          <select id="rhSource" class="border border-slate-300 rounded-lg px-2 py-1.5 bg-white max-w-[260px]"></select>
+          <label class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-medium px-3 py-1.5 rounded-lg cursor-pointer">
+            📂 CSV読込<input id="rhCsvInput" type="file" accept=".csv,text/csv" multiple class="hidden">
+          </label>
+          <button id="rhDownload" class="bg-white hover:bg-slate-50 border border-slate-300 font-medium px-3 py-1.5 rounded-lg" title="表示中のデータを gktools 形式（ヘッダなし・1行9個）で保存">💾 CSV</button>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <span id="rhCount" class="text-slate-600"></span>
+        <span id="rhFlagged" class="hidden px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold"></span>
+        <span id="rhSourceNote" class="text-slate-400"></span>
+      </div>
+
+      <div class="flex items-center gap-1 text-xs" id="rhViewModes">
+        <span class="font-semibold text-slate-600 mr-1">表示:</span>
+        <button data-view="both" class="rh-view px-2.5 py-1 rounded-md border">並べて表示</button>
+        <button data-view="box" class="rh-view px-2.5 py-1 rounded-md border">箱ひげ図のみ</button>
+        <button data-view="dist" class="rh-view px-2.5 py-1 rounded-md border">度数分布のみ</button>
+        <span id="rhScopeWrap" class="flex items-center gap-1 ml-4">
+          <span class="font-semibold text-slate-600 mr-1">箱ひげ図:</span>
+          <button data-scope="all" class="rh-scope px-2.5 py-1 rounded-md border">全員</button>
+          <button data-scope="stage" class="rh-scope px-2.5 py-1 rounded-md border">選択中のステージ</button>
+          <button data-scope="one" class="rh-scope px-2.5 py-1 rounded-md border">選択中のキャラだけ</button>
+        </span>
+      </div>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs" id="rhPicker"></div>
+      <div id="rhPanels" class="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+        <div id="rhBoxPanel" class="min-w-0">
+          <div class="text-xs font-semibold text-slate-500 mb-1" id="rhBoxTitle">箱ひげ図（クリックでキャラを選択）</div>
+          <div id="rhBox" class="w-full overflow-x-auto"></div>
+        </div>
+        <div id="rhDetail" class="min-w-0 space-y-2">
+          <div id="rhDetailTitle" class="text-sm font-bold text-slate-700"></div>
+          <table class="rh-tiles w-full table-fixed text-center"><thead><tr>
+            <th>最小</th><th>Q1</th><th class="hero">平均</th><th>中央値</th><th>Q3</th><th>最大</th></tr></thead>
+            <tbody><tr id="rhTiles"></tr></tbody></table>
+          <div class="relative w-full" style="aspect-ratio: 2 / 1; max-height: 520px;"><canvas id="rhDist"></canvas></div>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto max-h-[480px] overflow-y-auto border border-slate-200 rounded-lg">
+        <table id="rhTable" class="rh-table w-full text-xs text-right"></table>
+      </div>
+
+      <div id="rhDrop" class="hidden absolute inset-0 rounded-xl bg-indigo-500/10 border-2 border-dashed border-indigo-400 flex items-center justify-center text-indigo-700 font-bold">CSV をドロップして読み込み</div>
+    </div>
+
+    <!-- 下部：キャプチャログ＆管理 -->
+    <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between text-xs text-slate-500">
+      <div id="statusMessage" class="font-medium text-slate-700">準備完了．学マス画面を表示してキャプチャまたは自動検知スキャンを開始してください．</div>
+      <div class="flex items-center gap-3">
+        <button onclick="resetData()" class="text-red-500 hover:text-red-700 underline font-medium">全試行データ消去</button>
+        <a href="/api/trials" target="_blank" class="text-blue-500 hover:underline">RAWログ表示</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- キャプチャプレビューモーダル -->
+  <div id="previewModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-4 space-y-3">
+      <div class="flex items-center justify-between border-b pb-2">
+        <h3 class="text-sm font-bold text-slate-800">直近のキャプチャ画像プレビュー</h3>
+        <button onclick="togglePreviewModal()" class="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+      </div>
+      <div class="bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center max-h-[60vh]">
+        <img id="previewImg" src="/api/last_capture_image" alt="キャプチャプレビュー" class="max-h-[60vh] object-contain">
+      </div>
+      <p class="text-xs text-slate-500">※ ここにゲーム画面ではなくブラウザやエディタが写っている場合，学マスのウィンドウが手前に表示されていません．</p>
+      <div class="text-right">
+        <button onclick="togglePreviewModal()" class="px-4 py-1.5 text-xs bg-slate-200 hover:bg-slate-300 font-medium rounded-lg">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    Chart.register(ChartDataLabels);
+
+    let currentMode = "stage";
+    let currentStage = 1;
+    let stageCharts = [null, null, null];
+    let overallChartInstance = null;
+    let autoScanPollTimer = null;
+    let isAutoScanRunning = false;
+    let lastScanEventTime = null;
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      await fetchWindows();
+      await refreshCurrentView();
+    });
+
+    function togglePreviewModal() {
+      const m = document.getElementById("previewModal");
+      if (m.classList.contains("hidden")) {
+        m.classList.remove("hidden");
+        m.classList.add("flex");
+        document.getElementById("previewImg").src = "/api/last_capture_image?t=" + new Date().getTime();
+      } else {
+        m.classList.add("hidden");
+        m.classList.remove("flex");
+      }
+    }
+
+    // クリップボード画像の貼り付け対応 (Ctrl+V)
+    window.addEventListener("paste", async (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.indexOf("image") !== -1) {
+          const blob = item.getAsFile();
+          uploadImageBlob(blob);
+          break;
+        }
+      }
+    });
+
+    async function pasteFromClipboard() {
+      try {
+        const clipboardItems = await navigator.clipboard.read();
+        for (const item of clipboardItems) {
+          const imageTypes = item.types.filter(t => t.startsWith("image/"));
+          if (imageTypes.length > 0) {
+            const blob = await item.getType(imageTypes[0]);
+            uploadImageBlob(blob);
+            return;
+          }
+        }
+        alert("クリップボードに画像が見つかりません．Win+Shift+S等でスクショを撮ってから押してください．");
+      } catch (err) {
+        alert("クリップボードの読み取り許可が必要です．または画像を選択して Ctrl+V で貼り付けてください．");
+      }
+    }
+
+    function uploadImageBlob(blob) {
+      const reader = new FileReader();
+      const status = document.getElementById("statusMessage");
+      status.textContent = "⏳ クリップボード画像をOCR解析中...";
+
+      reader.onload = async () => {
+        const base64Data = reader.result;
+        try {
+          const res = await fetch("/api/upload_image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image_base64: base64Data })
+          });
+          const data = await res.json();
+          if (res.ok) {
+            status.textContent = `✅ 画像から ${data.detected_count} 個のスコアを検出し，グラフに反映しました！`;
+            await refreshCurrentView();
+          } else {
+            status.textContent = "❌ " + (data.detail || "スコアの検出に失敗しました．");
+            alert("読み取りエラー: " + data.detail);
+          }
+        } catch (e) {
+          status.textContent = "❌ アップロード通信エラーが発生しました．";
+        }
+      };
+      reader.readAsDataURL(blob);
+    }
+
+    // 自動切り替え検知スキャン トグル
+    async function toggleAutoScan() {
+      if (isAutoScanRunning) {
+        // 停止
+        await fetch("/api/auto_scan/stop", { method: "POST" });
+        isAutoScanRunning = false;
+        clearInterval(autoScanPollTimer);
+        autoScanPollTimer = null;
+
+        document.getElementById("btnAutoScan").className = "bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm";
+        document.getElementById("scanIndicator").className = "inline-block w-2 h-2 rounded-full bg-white";
+        document.getElementById("scanText").textContent = "🤖 自動検知スキャン: OFF";
+        document.getElementById("autoScanBanner").classList.add("hidden");
+        document.getElementById("statusMessage").textContent = "自動検知スキャンを停止しました．";
+      } else {
+        // 開始
+        const res = await fetch("/api/auto_scan/start", { method: "POST" });
+        const data = await res.json();
+        isAutoScanRunning = true;
+
+        document.getElementById("btnAutoScan").className = "bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm";
+        document.getElementById("scanIndicator").className = "inline-block w-2 h-2 rounded-full bg-white animate-ping";
+        document.getElementById("scanText").textContent = "⏹️ 自動検知スキャン: 監視中";
+        document.getElementById("autoScanBanner").classList.remove("hidden");
+
+        // 定期ステータスポーリング（1.5秒毎）
+        autoScanPollTimer = setInterval(async () => {
+          try {
+            const sRes = await fetch("/api/auto_scan/status");
+            const sData = await sRes.json();
+            const status = sData.status;
+
+            document.getElementById("autoScanMessage").textContent = status.status_message;
+            document.getElementById("autoScanCount").textContent = status.detected_count;
+
+            // 新しいスキャンイベントが発生していたらグラフを即座に再描画
+            if (status.last_event_time && status.last_event_time !== lastScanEventTime) {
+              lastScanEventTime = status.last_event_time;
+              document.getElementById("statusMessage").textContent = status.status_message;
+              await refreshCurrentView();
+            }
+          } catch (e) {}
+        }, 1500);
+      }
+    }
+
+    // ウィンドウ一覧取得
+    async function fetchWindows() {
+      try {
+        const res = await fetch("/api/windows");
+        const data = await res.json();
+        const select = document.getElementById("windowSelect");
+        select.innerHTML = "";
+
+        if (data.target_hwnd) {
+          const opt = document.createElement("option");
+          opt.value = data.target_hwnd;
+          opt.textContent = "⭐ gakumas (学マスゲーム画面)";
+          opt.selected = true;
+          select.appendChild(opt);
+        }
+
+        data.windows.forEach(w => {
+          if (w.hwnd !== data.target_hwnd) {
+            const opt = document.createElement("option");
+            opt.value = w.hwnd;
+            opt.textContent = w.title;
+            select.appendChild(opt);
+          }
+        });
+
+        if (select.children.length === 0) {
+          select.innerHTML = "<option value=''>gakumas 検出中...</option>";
+        }
+      } catch (err) {
+        console.error("ウィンドウ取得失敗:", err);
+      }
+    }
+
+    // キャプチャ実行
+    async function captureCurrentWindow() {
+      const select = document.getElementById("windowSelect");
+      const hwnd = select.value ? parseInt(select.value) : null;
+      const btn = document.getElementById("btnCapture");
+      const status = document.getElementById("statusMessage");
+
+      btn.disabled = true;
+      btn.textContent = "⏳ キャプチャ中...";
+      status.textContent = "学マスのウィンドウをキャプチャしてOCR認識しています...";
+
+      try {
+        const res = await fetch("/api/capture", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hwnd: hwnd })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          status.textContent = `✅ キャプチャ成功！(${data.detected_count}個のスコアを蓄積・グラフに反映しました)`;
+          await refreshCurrentView();
+        } else {
+          status.textContent = "❌ " + (data.detail || "キャプチャに失敗しました．");
+          alert("⚠️ キャプチャエラー\n\n" + data.detail + "\n\n※学マスの画面を手前に表示してから再度実行するか，Win+Shift+Sでスクショを撮ってCtrl+Vしてください．");
+          togglePreviewModal();
+        }
+      } catch (err) {
+        status.textContent = "❌ 通信エラーが発生しました．";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "📸 ウィンドウキャプチャ";
+      }
+    }
+
+    // サンプル取り込み
+    async function captureSample() {
+      const status = document.getElementById("statusMessage");
+      status.textContent = "サンプル画像を解析しています...";
+      try {
+        const res = await fetch("/api/capture_sample", { method: "POST" });
+        const data = await res.json();
+        if (res.ok) {
+          status.textContent = "✅ サンプル画像から9枠分のスコアを取り込みました！";
+          await refreshCurrentView();
+        } else {
+          status.textContent = "❌ " + data.detail;
+        }
+      } catch (e) {
+        status.textContent = "❌ エラーが発生しました．";
+      }
+    }
+
+    // ================= リハーサル分析（gktools と同じ集計・表示） =================
+    const RH = { rows: [], names: {}, selected: null, chart: null, sourceLabel: "" };
+    const RH_COLORS = { bar: "#1c8fe8", barTop: "#5bc0ff", highlight: "#f39800", highlightTop: "#ffc766", boxFill: "#e3f1fd", whisker: "#7fafde" };
+    const MIN_BUCKET_SIZE = 1000;
+
+    // gktools と同じ：要確認のステージは集計から除く／0 は除く
+    function rhColumn(stage, slot) {
+      const out = [];
+      for (const r of RH.rows) {
+        if (r.flags[stage] === "flagged") continue;
+        const v = r.scores[stage][slot];
+        if (v) out.push(v);
+      }
+      return out;
+    }
+    function rhQuantile(sorted, p) {
+      const i = (sorted.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+    }
+    function rhBoxStats(vals) {
+      if (!vals.length) return null;
+      const s = [...vals].sort((a, b) => a - b);
+      const q1 = rhQuantile(s, 0.25), q3 = rhQuantile(s, 0.75), iqr = q3 - q1;
+      const lo = q1 - 3 * iqr, hi = q3 + 3 * iqr;  // gktools と同じ k=3
+      const inside = s.filter(v => v >= lo && v <= hi);
+      return { q1, q3, median: rhQuantile(s, 0.5), mean: s.reduce((a, b) => a + b, 0) / s.length,
+               wlo: inside[0], whi: inside[inside.length - 1], outliers: s.filter(v => v < lo || v > hi), n: s.length };
+    }
+    // gktools の computeStats と同じ（平均・中央値は四捨五入）
+    function rhStats(vals) {
+      const s = [...vals].sort((a, b) => a - b), mid = Math.floor(s.length / 2);
+      const median = Math.round(s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid]);
+      return { min: s[0], max: s[s.length - 1], average: Math.round(s.reduce((a, b) => a + b, 0) / s.length), median };
+    }
+    // gktools の bucketScores と同じ
+    function rhBuckets(scores) {
+      const max = Math.max(...scores), min = Math.min(...scores);
+      const size = MIN_BUCKET_SIZE * Math.max(Math.floor((max - min) / MIN_BUCKET_SIZE / 100), 1);
+      const data = {};
+      for (const v of scores) { const b = Math.floor(v / size); data[b] = (data[b] || 0) + 1; }
+      const keys = Object.keys(data).map(Number), lo = Math.min(...keys), hi = Math.max(...keys);
+      const out = [];
+      for (let i = lo - 1; i <= hi + 1; i++) out.push([i * size, data[i] || 0]);
+      return { buckets: out, size };
+    }
+    function rhName(stage, slot) {
+      const n = RH.names[`stg${stage + 1}_slot${slot + 1}`];
+      return n && !/^ステージ\d-枠\d$/.test(n) ? n : `枠${slot + 1}`;
+    }
+
+    function rhRender() {
+      const flagged = RH.rows.filter(r => r.flags.includes("flagged")).length;
+      document.getElementById("rhCount").textContent = `${RH.rows.length} 回分`;
+      const fl = document.getElementById("rhFlagged");
+      fl.classList.toggle("hidden", !flagged); fl.textContent = `要確認 ${flagged} 件（集計から除外中）`;
+      document.getElementById("rhSourceNote").textContent = RH.sourceLabel;
+      rhEnsureSelected();
+      rhDrawPicker(); rhDrawBox(); rhDrawTable(); rhDrawDetail();
+    }
+
+    function rhDrawBox() {
+      const scope = RH.boxScope || "all";
+      const sel = RH.selected;
+      // 表示する箱の一覧（全員／選択中のステージの 3 人／選択中のキャラだけ）
+      const items = [];
+      for (let s = 0; s < 3; s++) for (let c = 0; c < 3; c++) {
+        const idx = s * 3 + c;
+        if (scope === "stage" && sel != null && s !== Math.floor(sel / 3)) continue;
+        if (scope === "one" && sel != null && idx !== sel) continue;
+        const st = rhBoxStats(rhColumn(s, c));
+        if (st) items.push({ s, c, idx, st });
+      }
+      const el = document.getElementById("rhBox");
+      document.getElementById("rhBoxTitle").textContent = scope === "one" && sel != null
+        ? `箱ひげ図：ステージ${Math.floor(sel / 3) + 1} ・ ${rhName(Math.floor(sel / 3), sel % 3)}`
+        : scope === "stage" && sel != null ? `箱ひげ図：ステージ${Math.floor(sel / 3) + 1} の 3 人（クリックでキャラを選択）` : "箱ひげ図（クリックでキャラを選択）";
+      if (!items.length) { el.innerHTML = `<div class="text-center text-slate-400 text-xs py-12">データがありません（CSV を読み込むか，周回してください）</div>`; return; }
+
+      const single = items.length === 1;
+      const W = RH.view === "box" ? 1100 : 640, H = 400, L = 62, R = single ? 190 : 8, T = 18, B = 34;
+      let lo = Math.min(...items.map(x => Math.min(x.st.wlo, ...x.st.outliers)));
+      let hi = Math.max(...items.map(x => Math.max(x.st.whi, ...x.st.outliers)));
+      const pad = (hi - lo) * 0.06 || Math.max(1, hi * 0.05); lo = Math.max(0, lo - pad); hi += pad;
+      const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+      // ステージごとにまとめて横に並べる
+      const stages = [...new Set(items.map(x => x.s))];
+      const gw = (W - L - R) / stages.length;
+      let g = "";
+      for (let i = 0; i <= 5; i++) {
+        const v = lo + (hi - lo) * i / 5;
+        g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#ececf1"/><text x="${L - 8}" y="${y(v) + 4}" font-size="11" text-anchor="end" fill="#8a8a93" font-weight="600">${Math.round(v).toLocaleString()}</text>`;
+      }
+      stages.forEach((s, gi) => {
+        const n = Math.max(...items.filter(x => x.s === s).map(x => x.st.n));
+        g += `<text x="${L + gw * (gi + .5)}" y="${H - 10}" font-size="13" text-anchor="middle" fill="#8a8a93" font-weight="600">ステージ${s + 1} (n=${n})</text>`;
+      });
+      items.forEach(({ s, c, idx, st }) => {
+        const gi = stages.indexOf(s), inGroup = items.filter(x => x.s === s), k = inGroup.findIndex(x => x.idx === idx);
+        const slotW = gw / inGroup.length, cx = L + gw * gi + slotW * (k + .5);
+        const bw = Math.min(single ? 120 : 60, slotW * 0.62), isSel = sel === idx && !single;
+        const stroke = RH_COLORS.bar;
+        g += `<g class="cursor-pointer" onclick="rhSelect(${idx})"><title>ステージ${s + 1} ${rhName(s, c)}\n最大 ${Math.round(st.whi).toLocaleString()}\nQ3 ${Math.round(st.q3).toLocaleString()}\n平均 ${Math.round(st.mean).toLocaleString()}\n中央値 ${Math.round(st.median).toLocaleString()}\nQ1 ${Math.round(st.q1).toLocaleString()}\n最小 ${Math.round(st.wlo).toLocaleString()}</title>`;
+        g += `<rect x="${cx - slotW / 2}" y="${T}" width="${slotW}" height="${H - T - B}" fill="${isSel ? "#dbeafe55" : "transparent"}"/>`;
+        g += `<line x1="${cx}" x2="${cx}" y1="${y(st.whi)}" y2="${y(st.q3)}" stroke="${stroke}" stroke-width="2"/><line x1="${cx}" x2="${cx}" y1="${y(st.q1)}" y2="${y(st.wlo)}" stroke="${stroke}" stroke-width="2"/>`;
+        g += `<line x1="${cx - bw / 4}" x2="${cx + bw / 4}" y1="${y(st.whi)}" y2="${y(st.whi)}" stroke="${stroke}" stroke-width="2"/><line x1="${cx - bw / 4}" x2="${cx + bw / 4}" y1="${y(st.wlo)}" y2="${y(st.wlo)}" stroke="${stroke}" stroke-width="2"/>`;
+        g += `<rect x="${cx - bw / 2}" y="${y(st.q3)}" width="${bw}" height="${Math.max(1, y(st.q1) - y(st.q3))}" fill="${RH_COLORS.boxFill}" stroke="${stroke}" stroke-width="${isSel ? 3 : 2}"/>`;
+        g += `<line x1="${cx - bw / 2}" x2="${cx + bw / 2}" y1="${y(st.median)}" y2="${y(st.median)}" stroke="${RH_COLORS.highlight}" stroke-width="2.5"/>`;
+        st.outliers.forEach(v => g += `<circle cx="${cx}" cy="${y(v)}" r="2.5" fill="${RH_COLORS.boxFill}" stroke="${RH_COLORS.whisker}"/>`);
+        if (single) {
+          // 1 人だけの時は各値を横に書き込む
+          g += `<circle cx="${cx}" cy="${y(st.mean)}" r="4" fill="#fff" stroke="#1c1c22" stroke-width="1.5"/>`;
+          const marks = [["最大", st.whi], ["Q3", st.q3], ["中央値", st.median], ["平均", st.mean], ["Q1", st.q1], ["最小", st.wlo]];
+          const minGap = 15; let lastY = -1e9;
+          marks.map(([lab, v]) => [lab, v, y(v)]).sort((a, b) => a[2] - b[2]).forEach(([lab, v, yy]) => {
+            const ty = Math.max(yy, lastY + minGap); lastY = ty;
+            const color = lab === "中央値" ? "#b45309" : lab === "平均" ? "#1c1c22" : "#475569";
+            g += `<line x1="${cx + bw / 2 + 4}" x2="${cx + bw / 2 + 30}" y1="${yy}" y2="${ty}" stroke="#cbd5e1"/>`;
+            g += `<text x="${cx + bw / 2 + 34}" y="${ty + 4}" font-size="12" fill="${color}" font-weight="${lab === "平均" ? 700 : 600}">${lab} ${Math.round(v).toLocaleString()}</text>`;
+          });
+          if (st.outliers.length) g += `<text x="${cx + bw / 2 + 34}" y="${Math.min(H - B, lastY + minGap + 4)}" font-size="11" fill="#94a3b8">外れ値 ${st.outliers.length} 件</text>`;
+        } else {
+          g += `<text x="${cx}" y="${y(st.whi) - 5}" font-size="10" text-anchor="middle" fill="#475569">${rhName(s, c)}</text>`;
+        }
+        g += `</g>`;
+      });
+      el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="w-full min-w-[420px] ${RH.view === "box" ? "max-h-[520px]" : ""}">${g}</svg>`;
+    }
+
+    function rhSetScope(scope) {
+      RH.boxScope = scope;
+      try { localStorage.setItem("rhBoxScope", scope); } catch (e) {}
+      document.querySelectorAll(".rh-scope").forEach(b => {
+        const on = b.dataset.scope === scope;
+        b.className = "rh-scope px-2.5 py-1 rounded-md border " + (on ? "bg-sky-600 border-sky-600 text-white font-bold" : "bg-white border-slate-300 text-slate-700 hover:bg-sky-50");
+      });
+      rhDrawBox();
+    }
+
+    // 表示の切り替え（並べて／箱ひげ図のみ／度数分布のみ）
+    function rhSetView(view) {
+      RH.view = view;
+      try { localStorage.setItem("rhView", view); } catch (e) {}
+      const panels = document.getElementById("rhPanels");
+      panels.classList.toggle("xl:grid-cols-2", view === "both");
+      document.getElementById("rhBoxPanel").classList.toggle("hidden", view === "dist");
+      document.getElementById("rhDetail").classList.toggle("hidden", view === "box");
+      document.getElementById("rhScopeWrap").classList.toggle("hidden", view === "dist");
+      document.querySelectorAll(".rh-view").forEach(b => {
+        const on = b.dataset.view === view;
+        b.className = "rh-view px-2.5 py-1 rounded-md border " + (on ? "bg-sky-600 border-sky-600 text-white font-bold" : "bg-white border-slate-300 text-slate-700 hover:bg-sky-50");
+      });
+      // 幅が変わるのでグラフを描き直す
+      rhDrawBox(); if (view !== "box") rhDrawDetail();
+    }
+
+    function rhSelect(idx) {
+      if (RH.selected === idx) return;
+      RH.selected = idx;
+      rhDrawPicker(); rhDrawBox(); rhDrawTable(); rhDrawDetail();
+    }
+    // データのある最初のキャラを選ぶ（未選択・選択中のキャラにデータが無い時）
+    function rhEnsureSelected() {
+      if (RH.selected != null && rhColumn(Math.floor(RH.selected / 3), RH.selected % 3).length) return;
+      RH.selected = null;
+      for (let i = 0; i < 9; i++) if (rhColumn(Math.floor(i / 3), i % 3).length) { RH.selected = i; break; }
+    }
+    function rhDrawPicker() {
+      const el = document.getElementById("rhPicker");
+      el.innerHTML = [0, 1, 2].map(s => `<div class="flex items-center gap-1"><span class="text-slate-500 font-semibold">ステージ${s + 1}</span>` +
+        [0, 1, 2].map(c => {
+          const idx = s * 3 + c, n = rhColumn(s, c).length, on = RH.selected === idx;
+          return `<button ${n ? "" : "disabled"} onclick="rhSelect(${idx})" class="px-2 py-1 rounded-md border ${on ? "bg-sky-600 border-sky-600 text-white font-bold" : n ? "bg-white border-slate-300 text-slate-700 hover:bg-sky-50" : "bg-slate-50 border-slate-200 text-slate-300"}">${rhName(s, c)}</button>`;
+        }).join("") + `</div>`).join("");
+    }
+
+    function rhDrawDetail() {
+      rhEnsureSelected();
+      if (RH.selected == null) {
+        document.getElementById("rhDetailTitle").textContent = "データがありません";
+        document.getElementById("rhTiles").innerHTML = "<td>-</td><td>-</td><td class='hero'>-</td><td>-</td><td>-</td><td>-</td>";
+        if (RH.chart) { RH.chart.destroy(); RH.chart = null; }
+        return;
+      }
+      const s = Math.floor(RH.selected / 3), c = RH.selected % 3, vals = rhColumn(s, c);
+      const st = rhStats(vals);
+      document.getElementById("rhDetailTitle").textContent = `ステージ${s + 1} ・ ${rhName(s, c)}（n=${vals.length}）`;
+      const sortedVals = [...vals].sort((a, b) => a - b);
+      const q1 = Math.round(rhQuantile(sortedVals, 0.25)), q3 = Math.round(rhQuantile(sortedVals, 0.75));
+      document.getElementById("rhTiles").innerHTML = [st.min, q1, st.average, st.median, q3, st.max]
+        .map((v, i) => `<td class="${i === 2 ? "hero" : ""}">${v.toLocaleString()}</td>`).join("");
+      const { buckets, size } = rhBuckets(vals);
+      const labels = buckets.map(b => b[0]), counts = buckets.map(b => b[1]);
+      const total = counts.reduce((a, b) => a + b, 0), before = [];
+      counts.reduce((acc, v) => (before.push(acc), acc + v), 0);
+      const grad = (chart, a, b) => { const ar = chart.chartArea; if (!ar) return a; const g = chart.ctx.createLinearGradient(0, ar.bottom, 0, ar.top); g.addColorStop(0, a); g.addColorStop(1, b); return g; };
+      const crosshair = {
+        id: "rhCrosshair",
+        afterEvent(chart, args) {
+          const e = args.event; let next = chart.$cross || null;
+          if (e.type === "mousemove") next = e.x >= chart.chartArea.left && e.x <= chart.chartArea.right ? { x: e.x } : null;
+          else if (e.type === "mouseout") next = null;
+          if ((chart.$cross?.x ?? null) !== (next?.x ?? null)) { chart.$cross = next; args.changed = true; }
+        },
+        afterDraw(chart) {
+          const st = chart.$cross; if (!st || !total) return;
+          const { ctx, chartArea, scales } = chart;
+          const raw = scales.x.getValueForPixel(st.x) + 0.5;
+          const i = Math.max(0, Math.min(counts.length - 1, Math.floor(raw))), f = Math.max(0, Math.min(1, raw - i));
+          const score = Math.round(labels[i] + f * size), pct = (before[i] + f * counts[i]) / total * 100;
+          ctx.save(); ctx.strokeStyle = "rgba(28,28,34,.45)"; ctx.beginPath(); ctx.moveTo(st.x, chartArea.top); ctx.lineTo(st.x, chartArea.bottom); ctx.stroke();
+          const text = `${score.toLocaleString()} · P${pct.toFixed(1)}`; ctx.font = "600 12px sans-serif";
+          const w = ctx.measureText(text).width + 16; let bx = st.x; if (bx + w > chartArea.right) bx = st.x - w;
+          ctx.fillStyle = "rgba(28,28,34,.92)"; ctx.beginPath(); ctx.roundRect(bx, Math.max(2, chartArea.top - 24), w, 20, 6); ctx.fill();
+          ctx.fillStyle = "#fff"; ctx.textBaseline = "top"; ctx.fillText(text, bx + 8, Math.max(2, chartArea.top - 24) + 4); ctx.restore();
+        },
+      };
+      if (RH.chart) RH.chart.destroy();
+      RH.chart = new Chart(document.getElementById("rhDist"), {
+        type: "bar",
+        data: { labels, datasets: [{
+          label: `スコア (n=${vals.length})`, data: counts,
+          backgroundColor: ({ chart, dataIndex }) => labels[dataIndex] <= st.median && st.median < labels[dataIndex] + size
+            ? grad(chart, RH_COLORS.highlight, RH_COLORS.highlightTop) : grad(chart, RH_COLORS.bar, RH_COLORS.barTop),
+          borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: "bottom" }] },
+        options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 26 } },
+          animation: { delay: ctx => ctx.type === "data" && ctx.mode === "default" ? ctx.dataIndex * 10 : 0 },
+          plugins: { datalabels: { display: false }, legend: { display: true },
+            tooltip: { callbacks: { title: items => `${labels[items[0].dataIndex].toLocaleString()} 〜 ${(labels[items[0].dataIndex] + size - 1).toLocaleString()}` } } },
+          scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 } } } },
+        plugins: [crosshair],
+      });
+    }
+
+    function rhDrawTable() {
+      const head = `<thead><tr><th rowspan="2" class="w-10">No.</th>${[1, 2, 3].map(s => `<th colspan="3" class="stage-start">ステージ${s}</th>`).join("")}<th rowspan="2"></th></tr>
+        <tr>${[0, 1, 2].map(s => [0, 1, 2].map(c => `<th class="${c === 0 ? "stage-start" : ""} font-normal text-slate-500">${rhName(s, c)}</th>`).join("")).join("")}</tr></thead>`;
+      const body = RH.rows.map((r, i) => `<tr><td class="text-center text-slate-400">${i + 1}</td>${[0, 1, 2].map(s => [0, 1, 2].map(c => {
+          const idx = s * 3 + c, cls = ["cell", c === 0 ? "stage-start" : "", RH.selected === idx ? "sel" : "", r.flags[s] === "flagged" ? "flag" : ""].join(" ");
+          return `<td class="${cls}" onclick="rhSelect(${idx})"><input value="${r.scores[s][c] || 0}" data-r="${i}" data-s="${s}" data-c="${c}" onclick="event.stopPropagation()" onchange="rhEdit(this)"></td>`;
+        }).join("")).join("")}
+        <td class="text-center whitespace-nowrap">${r.flags.includes("flagged") ? `<button class="text-emerald-600 hover:underline" title="この行を確認済みにして集計に含める" onclick="rhVerify(${i})">✓</button>` : ""}
+          <button class="text-slate-400 hover:text-red-500" title="この行を削除（表示中のデータのみ）" onclick="rhDelete(${i})">×</button></td></tr>`).join("");
+      document.getElementById("rhTable").innerHTML = head + `<tbody>${body}</tbody>`;
+    }
+    // 表示中のデータだけを書き換える（gktools と同じく，編集したステージは確認済み扱い）
+    function rhEdit(inp) {
+      const r = RH.rows[+inp.dataset.r], s = +inp.dataset.s, v = Number(inp.value.replace(/,/g, ""));
+      if (isNaN(v) || v < 0) { inp.value = r.scores[s][+inp.dataset.c]; return; }
+      r.scores[s][+inp.dataset.c] = v; r.flags[s] = "ok"; rhRender();
+    }
+    function rhVerify(i) { RH.rows[i].flags = RH.rows[i].flags.map(f => f === "flagged" ? "ok" : f); rhRender(); }
+    function rhDelete(i) { RH.rows.splice(i, 1); rhRender(); }
+
+    // gktools の parseCsvFile と同じ読み方（1 行 9 個，ヘッダなし）．ヘッダ付き results.csv も受け付ける
+    function rhParseCsv(text) {
+      const lines = text.replace(/^﻿/, "").trim().split(/\r?\n/).filter(l => l.trim());
+      if (!lines.length) return [];
+      const head = lines[0].split(",");
+      const k = head.indexOf("S1C1");
+      if (k >= 0) {  // このツールの results.csv
+        const si = head.indexOf("status");
+        return lines.slice(1).map(l => {
+          const f = l.split(","), n = j => Number(f[k + j]) || 0;
+          const flagged = si >= 0 && f[si] === "flagged";
+          return { scores: [[n(0), n(1), n(2)], [n(3), n(4), n(5)], [n(6), n(7), n(8)]], flags: Array(3).fill(flagged ? "flagged" : "ok") };
+        });
+      }
+      return lines.map(l => {
+        const row = l.split(",").map(Number);
+        return { scores: [row.slice(0, 3), row.slice(3, 6), row.slice(6, 9)].map(a => [0, 1, 2].map(i => a[i] || 0)), flags: ["ok", "ok", "ok"] };
+      });
+    }
+    async function rhLoadFiles(files) {
+      const list = [...files].filter(f => /\.csv$/i.test(f.name) || f.type === "text/csv");
+      if (!list.length) return;
+      let rows = [];
+      for (const f of list) rows = rows.concat(rhParseCsv(await f.text()));
+      RH.rows = rows;
+      RH.sourceLabel = `CSV: ${list.map(f => f.name).join(", ")}`;
+      const sel = document.getElementById("rhSource");
+      if (![...sel.options].some(o => o.value === "csv")) sel.insertAdjacentHTML("beforeend", `<option value="csv">読み込んだ CSV</option>`);
+      sel.value = "csv";
+      rhRender();
+    }
+
+    async function rhLoadSourceList() {
+      const sel = document.getElementById("rhSource"), keep = sel.value;
+      let sessions = [];
+      try { sessions = (await (await fetch("/api/auto/sessions")).json()).sessions; } catch (e) {}
+      sel.innerHTML = `<option value="db">ダッシュボードの全データ</option>` +
+        sessions.map(s => `<option value="session:${s.id}">周回 ${s.id}（${s.iterations}回）</option>`).join("") +
+        (RH.sourceLabel.startsWith("CSV") ? `<option value="csv">読み込んだ CSV</option>` : "");
+      if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+    }
+    async function rhLoad() {
+      const src = document.getElementById("rhSource").value || "db";
+      if (src === "csv") return rhRender();
+      try {
+        const res = await (await fetch(`/api/rehearsal_rows?source=${encodeURIComponent(src)}`)).json();
+        RH.rows = res.rows; RH.names = res.idol_names || {};
+        RH.sourceLabel = src === "db" ? "キャプチャ・自動周回で登録された全スコア" : `セッションフォルダ sessions/${src.slice(8)}`;
+      } catch (e) { RH.rows = []; }
+      if (RH.selected != null && !RH.rows.length) RH.selected = null;
+      rhRender();
+    }
+    // 既存のキャプチャ処理などから呼ばれる更新関数
+    async function refreshCurrentView() {
+      if (document.getElementById("rhSource").value === "csv") return;
+      await rhLoadSourceList(); await rhLoad();
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      let v = "both";
+      try { v = localStorage.getItem("rhView") || "both"; } catch (e) {}
+      document.querySelectorAll(".rh-view").forEach(b => b.addEventListener("click", () => rhSetView(b.dataset.view)));
+      let sc = "all";
+      try { sc = localStorage.getItem("rhBoxScope") || "all"; } catch (e) {}
+      RH.boxScope = ["all", "stage", "one"].includes(sc) ? sc : "all";
+      document.querySelectorAll(".rh-scope").forEach(b => b.addEventListener("click", () => rhSetScope(b.dataset.scope)));
+      rhSetScope(RH.boxScope);
+      rhSetView(["both", "box", "dist"].includes(v) ? v : "both");
+      document.getElementById("rhSource").addEventListener("change", () => rhLoad());
+      document.getElementById("rhCsvInput").addEventListener("change", e => { rhLoadFiles(e.target.files); e.target.value = ""; });
+      document.getElementById("rhDownload").addEventListener("click", () => {
+        if (!RH.rows.length) return;
+        const csv = RH.rows.map(r => r.scores.map(s => s.join(",")).join(",")).join("\n");
+        const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+        a.download = "rehearsal_data.csv"; a.click(); URL.revokeObjectURL(a.href);
+      });
+      const card = document.getElementById("rehearsalCard"), drop = document.getElementById("rhDrop");
+      let depth = 0;
+      card.addEventListener("dragenter", e => { e.preventDefault(); depth++; drop.classList.remove("hidden"); });
+      card.addEventListener("dragover", e => e.preventDefault());
+      card.addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; drop.classList.add("hidden"); } });
+      card.addEventListener("drop", e => { e.preventDefault(); depth = 0; drop.classList.add("hidden"); rhLoadFiles(e.dataTransfer.files); });
+    });
+
+    async function saveIdolName(stage, slot, name) {
+      try {
+        await fetch("/api/set_idol_name", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stage, slot, name })
+        });
+      } catch (err) {}
+    }
+
+    async function resetData() {
+      if (confirm("全ての試行データを消去しますか？")) {
+        await fetch("/api/reset", { method: "POST" });
+        refreshCurrentView();
+      }
+    }
+  </script>
+</body>
+</html>

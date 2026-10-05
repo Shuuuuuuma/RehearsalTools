@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>学マス 自動周回</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background:#f8fafc; color:#0f172a; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Yu Gothic UI",Meiryo,sans-serif; }
+  .card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .tab-btn[aria-selected="true"] { background:#db2777; color:#fff; }
+  .num { font-variant-numeric: tabular-nums; }
+  .sheet th, .sheet td { border:1px solid #e2e8f0; padding:2px 6px; }
+  .sheet input { width:6.2rem; text-align:right; border:1px solid transparent; border-radius:4px; padding:1px 3px; background:transparent; }
+  .sheet input:focus { border-color:#db2777; outline:none; background:#fff; }
+  .sheet input.changed { background:#fef9c3; }
+  .badge { display:inline-flex; align-items:center; gap:4px; font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid; white-space:nowrap; }
+  .ok { color:#047857; border-color:#a7f3d0; background:#ecfdf5; }
+  .ng { color:#b91c1c; border-color:#fecaca; background:#fef2f2; }
+  .warn { color:#a16207; border-color:#fde68a; background:#fefce8; }
+  .muted { color:#475569; border-color:#e2e8f0; background:#f8fafc; }
+  #calibWrap { position:relative; display:inline-block; user-select:none; }
+  #calibWrap img { display:block; max-height:72vh; width:auto; }
+  #calibSvg { position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; }
+  .hidden { display:none !important; }
+  .guide h3 { font-size: 15px; font-weight: 700; color: #0f172a; margin: 22px 0 6px; padding-top: 6px; border-top: 1px solid #f1f5f9; scroll-margin-top: 12px; }
+  .guide ul { list-style: disc; padding-left: 1.3rem; } .guide ol { list-style: decimal; padding-left: 1.3rem; }
+  .guide li { margin: 3px 0; } .guide ul ul { list-style: circle; margin-top: 2px; }
+  .guide code { background: #f1f5f9; padding: 0 4px; border-radius: 4px; font-size: 12px; }
+  .guide a { color: #be185d; text-decoration: underline; }
+  .guide dt { font-weight: 700; margin-top: 8px; } .guide dd { margin-left: 1rem; }
+  .guide .g-chip { text-decoration: none; border: 1px solid #e2e8f0; border-radius: 999px; padding: 3px 10px; color: #334155; }
+  .guide .g-chip:hover { background: #fdf2f8; }
+  .log { font-family: ui-monospace, Consolas, monospace; font-size:11px; }
+</style>
+</head>
+<body class="p-3 md:p-5">
+<div class="max-w-[1600px] mx-auto space-y-3">
+
+  <!-- ヘッダー -->
+  <div class="card p-3 flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-lg font-bold">🌸 学マス リハーサル自動周回</h1>
+      <p class="text-xs text-slate-500">ホットキー：<b>Ctrl+Shift+A</b> 開始 ／ <b>Ctrl+Shift+Q</b> 中断 ／ <b>Ctrl+Shift+S</b> スクショ（保存＋クリップボード）</p>
+    </div>
+    <div id="envBadges" class="flex flex-wrap gap-1.5 items-center text-xs"></div>
+    <a href="/" class="text-xs text-pink-700 hover:underline">集計ダッシュボードへ →</a>
+  </div>
+
+  <!-- タブ -->
+  <div class="flex gap-1.5 text-sm" role="tablist">
+    <button class="tab-btn px-3 py-1.5 rounded-lg bg-white border" data-tab="run" aria-selected="true">▶ 実行・ライブ集計</button>
+    <button class="tab-btn px-3 py-1.5 rounded-lg bg-white border" data-tab="review">✎ OCR レビュー</button>
+    <button class="tab-btn px-3 py-1.5 rounded-lg bg-white border" data-tab="calib">⚙ 設定・キャリブレーション</button>
+    <button class="tab-btn px-3 py-1.5 rounded-lg bg-white border" data-tab="sessions">📁 セッション</button>
+    <button class="tab-btn px-3 py-1.5 rounded-lg bg-white border" data-tab="guide">📖 使い方</button>
+  </div>
+
+  <!-- ================= 実行 ================= -->
+  <section id="tab-run" class="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-3">
+    <div class="space-y-3">
+      <div class="card p-4 space-y-3">
+        <div class="flex items-end gap-2">
+          <label class="text-xs text-slate-600">周回数
+            <input id="iterInput" type="number" min="1" value="10" class="block w-24 border rounded-lg px-2 py-1.5 text-sm num">
+          </label>
+          <label class="text-xs text-slate-600 flex-1">保存先
+            <select id="runSession" class="block w-full border rounded-lg px-2 py-1.5 text-sm"></select>
+          </label>
+        </div>
+        <div class="flex gap-2">
+          <button id="btnStart" class="flex-1 bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 rounded-lg">▶ 開始</button>
+          <button id="btnAbort" class="flex-1 bg-slate-700 hover:bg-slate-800 text-white font-bold py-2 rounded-lg">■ 中断</button>
+        </div>
+        <p class="text-[11px] text-slate-500 leading-relaxed">ゲームを「コンテスト → リハーサル」画面にしてから開始してください．
+          対戦準備画面の「全対戦スキップ」にチェックを入れておくと 1 周が速くなります．
+          既存セッションに追加する場合は，開始前に編成が同じかを自動で確認します．</p>
+      </div>
+
+      <div class="card p-4 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-slate-500">状態</span>
+          <span id="stSession" class="text-[11px] text-slate-400"></span>
+        </div>
+        <div id="stState" class="text-xl font-bold">待機中</div>
+        <div id="stMsg" class="text-xs text-slate-600"></div>
+        <div class="h-2 bg-slate-100 rounded-full overflow-hidden"><div id="stBar" class="h-full bg-pink-500 transition-all" style="width:0%"></div></div>
+        <div class="grid grid-cols-4 gap-2 text-center text-xs">
+          <div><div class="text-slate-500">完了</div><div id="stDone" class="font-bold num">-</div></div>
+          <div><div class="text-slate-500">経過</div><div id="stElapsed" class="font-bold num">-</div></div>
+          <div><div class="text-slate-500">1周平均</div><div id="stAvg" class="font-bold num">-</div></div>
+          <div><div class="text-slate-500">残り</div><div id="stEta" class="font-bold num">-</div></div>
+        </div>
+        <div id="stError" class="hidden text-xs ng border rounded-lg p-2"></div>
+      </div>
+
+      <div class="card p-3">
+        <div class="text-xs text-slate-500 mb-1">ログ</div>
+        <div id="logBox" class="log h-64 overflow-y-auto bg-slate-50 rounded p-2 whitespace-pre-wrap"></div>
+      </div>
+    </div>
+
+    <div class="space-y-3 min-w-0">
+      <div class="card p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div>
+            <h2 class="font-bold">スコア分布（9 人）</h2>
+            <p id="liveCaption" class="text-xs text-slate-500">-</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <select id="liveSession" class="border rounded-lg px-2 py-1 text-xs"></select>
+            <button id="btnCsv" class="border rounded-lg px-2 py-1 hover:bg-slate-50" title="このセッションの全項目 CSV を保存">💾 CSV</button>
+          </div>
+        </div>
+        <div id="boxplot" class="w-full overflow-x-auto"></div>
+        <div class="overflow-x-auto mt-3">
+          <table class="sheet w-full text-xs num" id="statTable"></table>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div class="card p-4">
+          <h3 class="font-bold text-sm mb-2">直近の OCR 結果</h3>
+          <div id="lastResult" class="text-xs text-slate-500">まだありません</div>
+        </div>
+        <div class="card p-4">
+          <h3 class="font-bold text-sm mb-2">ステージ合計</h3>
+          <table class="sheet w-full text-xs num" id="stageTable"></table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= レビュー ================= -->
+  <section id="tab-review" class="hidden space-y-3">
+    <div class="card p-3 flex flex-wrap items-center gap-2 text-xs">
+      <select id="revSession" class="border rounded-lg px-2 py-1"></select>
+      <div id="revFilters" class="flex gap-1"></div>
+      <input id="revSearch" placeholder="周回番号・数値で検索" class="border rounded-lg px-2 py-1 w-44">
+      <span class="flex-1"></span>
+      <span id="revInfo" class="text-slate-500"></span>
+      <button id="revSave" class="bg-pink-600 hover:bg-pink-700 text-white font-bold px-3 py-1.5 rounded-lg">修正を保存</button>
+    </div>
+    <p class="text-xs text-slate-500 px-1">「3 人のスコア＋ボーナス＝ステージ合計」が成り立たない行は <b>要確認</b> になり，直すまで統計から除外されます．値を直して保存すると「手修正」になります．</p>
+    <div class="card overflow-x-auto"><table class="sheet w-full text-xs num" id="revTable"></table></div>
+  </section>
+
+  <!-- ================= 設定・キャリブレーション ================= -->
+  <section id="tab-calib" class="hidden grid grid-cols-1 xl:grid-cols-[auto_1fr] gap-3">
+    <div class="card p-3 space-y-2">
+      <div class="flex flex-wrap gap-2 items-center text-xs">
+        <button id="btnPreview" class="bg-slate-800 text-white px-3 py-1.5 rounded-lg">📷 ゲーム画面を取得</button>
+        <label class="flex items-center gap-1"><input type="checkbox" id="autoPreview"> 1秒ごとに更新</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="showOcr" checked> OCR 領域</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="showIcons"> 編成アイコン領域</label>
+      </div>
+      <div class="text-xs flex flex-wrap gap-1 items-center">
+        <span class="text-slate-500">編集対象：</span>
+        <select id="editTarget" class="border rounded px-1 py-0.5">
+          <option value="">（なし）</option>
+          <option value="start.region">開始ボタン 判定領域（ドラッグ）</option>
+          <option value="start.click">開始ボタン クリック位置（クリック）</option>
+          <option value="skip.region">スキップ 判定領域（ドラッグ）</option>
+          <option value="skip.click">スキップ クリック位置（クリック）</option>
+          <option value="end.region">終了ボタン 判定領域（ドラッグ）</option>
+          <option value="end.click">終了ボタン クリック位置（クリック）</option>
+          <option value="confirm.region">確認ダイアログ「開始する」判定領域（ドラッグ）</option>
+          <option value="confirm.click">確認ダイアログ「開始する」クリック位置（クリック）</option>
+          <option value="preparing.region">「コンテスト準備中」判定領域（ドラッグ）</option>
+        </select>
+      </div>
+      <div id="calibWrap"><img id="calibImg" alt="ゲーム画面を取得してください"><svg id="calibSvg"></svg></div>
+      <div id="calibMsg" class="text-xs text-slate-500">ゲーム画面を取得すると，現在の領域が重ねて表示されます．</div>
+    </div>
+
+    <div class="space-y-3 min-w-0">
+      <div class="card p-4">
+        <h3 class="font-bold text-sm mb-1">① ボタンの参照画像</h3>
+        <p class="text-xs text-slate-500 mb-3">その画面をゲームに表示した状態で「撮影」を押すと，判定領域を切り抜いて保存します（開始＝リハーサル画面，スキップ＝対戦準備画面でスキップが明るい時，終了＝結果画面）．</p>
+        <div class="grid grid-cols-3 gap-3" id="refCards"></div>
+        <div class="mt-3 flex gap-2 text-xs">
+          <button id="btnDetect" class="border px-3 py-1.5 rounded-lg hover:bg-slate-50">🔍 今の画面で判定テスト</button>
+          <span id="detectOut" class="text-slate-600"></span>
+        </div>
+      </div>
+
+      <div class="card p-4">
+        <h3 class="font-bold text-sm mb-2">② クリック・OCR テスト</h3>
+        <div class="flex flex-wrap gap-2 text-xs">
+          <button class="clickTest border px-3 py-1.5 rounded-lg hover:bg-slate-50" data-b="start">「開始する」を押す</button>
+          <button class="clickTest border px-3 py-1.5 rounded-lg hover:bg-slate-50" data-b="skip">「スキップ」を押す</button>
+          <button class="clickTest border px-3 py-1.5 rounded-lg hover:bg-slate-50" data-b="end">「終了」を押す</button>
+          <button class="clickTest border px-3 py-1.5 rounded-lg hover:bg-slate-50" data-b="confirm">確認ダイアログの「開始する」を押す</button>
+          <button id="btnOcrTest" class="border px-3 py-1.5 rounded-lg hover:bg-slate-50">今の画面で OCR</button>
+          <button id="btnOcrPaste" class="border px-3 py-1.5 rounded-lg hover:bg-slate-50">貼り付け画像で OCR（Ctrl+V）</button>
+        </div>
+        <div id="testOut" class="mt-2 text-xs"></div>
+      </div>
+
+      <div class="card p-4">
+        <h3 class="font-bold text-sm mb-2">③ 動作設定</h3>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-2 text-xs" id="settingsForm"></div>
+        <details class="mt-3 text-xs">
+          <summary class="cursor-pointer text-slate-600">詳細：設定 JSON を直接編集</summary>
+          <textarea id="cfgJson" class="w-full h-72 border rounded-lg p-2 log mt-2"></textarea>
+        </details>
+        <div class="mt-3 flex gap-2 text-xs">
+          <button id="btnSaveCfg" class="bg-pink-600 hover:bg-pink-700 text-white font-bold px-3 py-1.5 rounded-lg">設定を保存</button>
+          <button id="btnResetCfg" class="border px-3 py-1.5 rounded-lg hover:bg-slate-50">既定値に戻す</button>
+          <span id="cfgMsg" class="text-slate-500 self-center"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= セッション ================= -->
+  <!-- ================= 使い方 ================= -->
+  <section id="tab-guide" class="hidden">
+    <div class="card p-5 md:p-7 max-w-4xl guide text-sm leading-relaxed text-slate-700">
+      <h2 class="text-xl font-bold text-slate-900 mb-1">📖 使い方</h2>
+      <p class="text-slate-500 mb-4">学マス（PC 版）のコンテストのリハーサルを自動で周回し，結果画面のスコアを読み取って，キャラごとの平均（Ave）や分布を集計するツールです．</p>
+
+      <nav class="flex flex-wrap gap-2 text-xs mb-6">
+        <a href="#g-start" class="g-chip">はじめる前に</a><a href="#g-setup" class="g-chip">初回の設定</a><a href="#g-run" class="g-chip">周回する</a>
+        <a href="#g-review" class="g-chip">読み取りの確認</a><a href="#g-data" class="g-chip">データを見る・保存する</a><a href="#g-merge" class="g-chip">編成を変えたとき</a>
+        <a href="#g-keys" class="g-chip">ホットキー</a><a href="#g-trouble" class="g-chip">困ったとき</a><a href="#g-note" class="g-chip">注意</a>
+      </nav>
+
+      <h3 id="g-start">1. はじめる前に</h3>
+      <ul>
+        <li>Windows 10 / 11 と，PC 版の学マス（ウィンドウ名「gakumas」）が必要です．</li>
+        <li>このページは，ツールの黒い画面が開いている間だけ使えます．<b>黒い画面を閉じるとツールも終了</b>します．</li>
+        <li>画面の見た目やグラフの部品をインターネットから読み込むので，ネットにつながった状態で使ってください．</li>
+        <li>設定・参照画像・周回結果は，ツール（exe）と同じフォルダに保存されます．</li>
+        <li>画面上部のバッジで状態が分かります：<span class="badge ok">ゲーム検出</span> <span class="badge warn">管理者ではない</span> <span class="badge ok">OCR: template</span> <span class="badge warn">参照画像 0/3</span></li>
+      </ul>
+
+      <h3 id="g-setup">2. 初回の設定（5 分くらい）</h3>
+      <p>「⚙ 設定・キャリブレーション」タブで行います．設定しなくても色や形による判定で動きますが，やっておくと確実です．</p>
+      <ol>
+        <li><b>ボタンの参照画像を撮る</b>：ゲームに次の画面を出した状態で，それぞれ「📸 撮影」を押します．
+          <ul>
+            <li>開始する … コンテスト →「リハーサル」画面（編成が並んでいる画面）</li>
+            <li>スキップ … 対戦準備画面で，右下の「コンテスト準備中…」が消えて「スキップ」が明るくなった時</li>
+            <li>終了 … リハーサル結果画面</li>
+          </ul></li>
+        <li><b>判定テスト</b>：それぞれの画面で「🔍 今の画面で判定テスト」を押し，その画面のボタンだけ「見えている」になるか確認します．</li>
+        <li><b>クリックテスト</b>：「『開始する』を押す」などで，実際にゲームのボタンが押されるか確認します．押されない場合は「③ 動作設定」の<b>クリック方式</b>を <code>sendinput</code> に変えて保存し，もう一度試してください．</li>
+        <li><b>OCR テスト</b>：結果画面で「今の画面で OCR」を押し，9 人のスコアが正しく読めるか確認します．</li>
+        <li>位置がずれている場合は「📷 ゲーム画面を取得」→「編集対象」を選び，画像の上を<b>ドラッグ（領域）</b>／<b>クリック（位置）</b>して直し，「設定を保存」．領域を直したら参照画像も撮り直してください．</li>
+      </ol>
+
+      <h3 id="g-run">3. 周回する</h3>
+      <ol>
+        <li>ゲームを「コンテスト → リハーサル」画面にします．対戦準備画面の<b>「全対戦スキップ」にチェック</b>を入れておくと速くなります．</li>
+        <li>「▶ 実行・ライブ集計」タブで<b>周回数</b>を入れ，保存先を選んで「▶ 開始」．
+          <ul>
+            <li>新しいセッション … 新しく記録を始めます（編成を変えた時はこちら）</li>
+            <li>既存のセッション … 同じ編成で続きを取ります（編成が違うと開始できません → <a href="#g-merge">6.</a>）</li>
+          </ul></li>
+        <li>周回中は右側に 9 人の箱ひげ図と平均・中央値などがリアルタイムで更新されます．</li>
+        <li>止める時は「■ 中断」か <b>Ctrl+Shift+Q</b>．</li>
+      </ol>
+      <p>1 周の流れ：リハーサル画面 →「開始する」→（空き枠がある編成なら確認ダイアログの「開始する」）→「コンテスト準備中…」が消えるまで待つ →「スキップ」→ 結果画面を撮影 →「終了」．
+        PC が遅くても「準備中」の間は待ち続けます．ゲームはほかのウィンドウの裏にあっても動きます（クリック方式が sendinput の時は，クリックのたびにゲームが前面に出ます）．<b>最小化はしない</b>でください．</p>
+
+      <h3 id="g-review">4. 読み取りの確認</h3>
+      <ul>
+        <li>結果画面の数字は「<b>ステージ合計 ＝ 3 人のスコア ＋ ボーナス（最高スコア ÷ 5）</b>」で必ず検算しています．</li>
+        <li>合わない時は自動で読み直し（<span class="badge warn">自動補正</span>），それでも合わない回は <span class="badge ng">要確認</span> になり，<b>直すまで集計から外れます</b>．</li>
+        <li>「✎ OCR レビュー」タブで，切り抜き画像を見ながら数字を直して「修正を保存」．正しいのに要確認になっている行は「確認済にする」．</li>
+        <li>キャラを置いていない枠（「ー」表示）は空欄として記録され，集計には入りません．</li>
+      </ul>
+
+      <h3 id="g-data">5. データを見る・保存する</h3>
+      <ul>
+        <li><b>集計ダッシュボード</b>（右上のリンク）の「📊 リハーサル分析」で，箱ひげ図と度数分布を表示できます．キャラ選択ボタン・箱・表の数字のどれかを押すとそのキャラの分布を表示．「表示:」「箱ひげ図:」で並べ方や表示する人数を切り替えられます．</li>
+        <li>データは「ダッシュボードの全データ」「周回セッション（1 回ずつ）」「CSV 読込」から選べます．CSV はカードにドロップしても読み込めます．</li>
+        <li><b>CSV の保存</b>：「📁 セッション」タブの「CSV: 全項目／9列（gktools用）／統計」，またはダッシュボードの「💾 CSV」．
+          「9列（gktools用）」は <a href="https://gktools.unoeins.org/rehearsal" target="_blank" rel="noopener">gktools のリハーサル集計</a> にそのまま読み込めます．</li>
+        <li>周回結果は <code>sessions\日時\</code> フォルダにもあります（結果画面のスクショ・CSV・グラフ画像）．「フォルダを開く」ですぐ開けます．</li>
+      </ul>
+
+      <h3 id="g-merge">6. 編成を変えたとき（セッションの結合）</h3>
+      <p>ステージ3 を外して速く回したい時などは，<b>新しいセッションで周回</b>してから，あとで結合します．</p>
+      <ol>
+        <li>「📁 セッション」タブの「🔗 結合」で，結合先（元のデータ）と結合元（足すデータ）を選び「対応付けを作る」．</li>
+        <li>編成画像を比べて同じキャラ同士が自動で選ばれます．違っていればプルダウンで直します（キャラが別の枠に移っていても対応付けできます）．</li>
+        <li>「結合して新しいセッションを作る」．元の 2 つはそのまま残ります．</li>
+      </ol>
+
+      <h3 id="g-keys">7. ホットキー（ツールが前面でなくても使えます）</h3>
+      <table class="sheet text-xs"><tr><th>Ctrl+Shift+A</th><td>前回の周回数で開始（新しいセッション）</td></tr>
+        <tr><th>Ctrl+Shift+Q</th><td>中断</td></tr>
+        <tr><th>Ctrl+Shift+S</th><td>ゲーム画面を保存（data\hotkey_screenshots）＋クリップボードにコピー</td></tr></table>
+
+      <h3 id="g-trouble">8. 困ったとき</h3>
+      <dl>
+        <dt>ボタンが押されない</dt><dd>クリック方式を <code>sendinput</code> に変える／ツールを右クリック →「管理者として実行」で起動する．</dd>
+        <dt>途中で止まる</dt><dd>ログに理由が出ます．止まった瞬間の画面がセッションフォルダに <code>stopped_時刻.png</code> として保存され，各ボタンの判定結果もログに出るので，参照画像の撮り直しや領域の調整の手がかりにしてください．</dd>
+        <dt>「ゲーム未検出」になる</dt><dd>ゲームを起動し，最小化していないか確認．ウィンドウ名が違う場合は動作設定の「ウィンドウ名」を変更．</dd>
+        <dt>読み取りが要確認ばかり</dt><dd>「今の画面で OCR」で確認し，OCR 領域（設定画面の青い枠）が数字に重なっているか確認．Windows の拡大率やウィンドウサイズを変えた後は参照画像も撮り直してください．</dd>
+        <dt>赤い「プログラムが古い」表示が出る</dt><dd>ツールを閉じて起動し直してください．</dd>
+        <dt>起動時に Windows の警告が出る</dt><dd>署名のないアプリのため表示されます．「詳細情報」→「実行」で起動できます．</dd>
+      </dl>
+
+      <h3 id="g-note">9. 注意</h3>
+      <ul>
+        <li>ゲームを自動で操作するツールは，ゲームの利用規約に反する可能性があります．<b>使用は自己責任</b>でお願いします．</li>
+        <li>読み取り結果は検算していますが，完全ではありません．大事な判断の前には，要確認の行やスクショを確認してください．</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="tab-sessions" class="hidden space-y-3">
+    <div class="card overflow-x-auto"><table class="sheet w-full text-xs" id="sessTable"></table></div>
+    <div class="card p-4 space-y-3">
+      <div>
+        <h3 class="font-bold text-sm">🔗 結合</h3>
+        <p class="text-xs text-slate-500">別々に取ったセッションを 1 つにまとめます．結合元の各枠を，結合先のどの枠に足すかを選んでください（編成画像が似ている枠を自動で選びます）．元の 2 つのセッションはそのまま残り，結果は新しいセッションとして保存されます．</p>
+      </div>
+      <div class="flex flex-wrap items-end gap-3 text-xs">
+        <label>結合先（ベース）<select id="mgBase" class="block border rounded-lg px-2 py-1.5 min-w-[220px]"></select></label>
+        <span class="pb-2 text-slate-400">＋</span>
+        <label>結合元（足すデータ）<select id="mgSource" class="block border rounded-lg px-2 py-1.5 min-w-[220px]"></select></label>
+        <button id="mgSuggest" class="border px-3 py-1.5 rounded-lg hover:bg-slate-50">対応付けを作る</button>
+      </div>
+      <div id="mgGrid" class="hidden">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3" id="mgStages"></div>
+        <div class="flex items-center gap-3 mt-3 text-xs">
+          <button id="mgRun" class="bg-pink-600 hover:bg-pink-700 text-white font-bold px-4 py-2 rounded-lg">結合して新しいセッションを作る</button>
+          <span id="mgMsg" class="text-slate-600"></span>
+        </div>
+      </div>
+    </div>
+    <div class="card p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <h3 class="font-bold text-sm">グラフ</h3><span id="chartSess" class="text-xs text-slate-500"></span>
+      </div>
+      <div id="chartImgs" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const COLS = ["S1C1","S1C2","S1C3","S2C1","S2C2","S2C3","S3C1","S3C2","S3C3"];
+const STATUS_LABEL = {ok:"OK", repaired:"自動補正", flagged:"要確認", manual:"手修正", verified:"確認済"};
+const STATUS_CLASS = {ok:"ok", repaired:"warn", flagged:"ng", manual:"muted", verified:"ok"};
+const fmt = v => v == null ? "-" : Math.round(v).toLocaleString();
+const sec = s => s == null ? "-" : (s >= 3600 ? `${Math.floor(s/3600)}h${String(Math.floor(s%3600/60)).padStart(2,"0")}m` : s >= 60 ? `${Math.floor(s/60)}m${String(s%60).padStart(2,"0")}s` : `${s}s`);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function api(path, opt = {}) {
+  const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opt,
+    body: opt.body && typeof opt.body !== "string" ? JSON.stringify(opt.body) : opt.body});
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).detail || msg; } catch {}
+    throw new Error(msg);
+  }
+  return r.headers.get("content-type")?.includes("json") ? r.json() : r;
+}
+
+// ---------------- タブ ----------------
+document.querySelectorAll(".tab-btn").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tab-btn").forEach(x => x.setAttribute("aria-selected", x === b));
+  document.querySelectorAll("section[id^=tab-]").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + b.dataset.tab));
+  if (b.dataset.tab === "review") loadReview();
+  if (b.dataset.tab === "calib") loadConfig();
+  if (b.dataset.tab === "sessions") loadSessions();
+});
+
+// ---------------- 環境 ----------------
+let ENV = {};
+async function loadEnv() {
+  try { ENV = await api("/api/auto/env"); } catch (e) { return; }
+  const b = (ok, text, cls) => `<span class="badge ${cls || (ok ? "ok" : "ng")}">${text}</span>`;
+  const EXPECTED_VERSION = "2026-10-05.1";
+  if (ENV.version !== EXPECTED_VERSION && !document.getElementById("verWarn")) {
+    document.body.insertAdjacentHTML("afterbegin", `<div id="verWarn" class="max-w-[1600px] mx-auto mb-3 p-3 rounded-lg border ng text-sm font-bold">⚠ ツールのプログラムが古いまま動いています．ツールを閉じて <code>python run_tool.py</code> で起動し直してください（新しい機能が動きません）．</div>`);
+  }
+  const refs = ENV.references || {};
+  const nref = Object.values(refs).filter(Boolean).length;
+  $("#envBadges").innerHTML = [
+    b(ENV.window_found, ENV.window_found ? `ゲーム検出 ${ENV.client_size?.join("×")}` : "ゲーム未検出"),
+    b(ENV.is_admin, ENV.is_admin ? "管理者で実行中" : "管理者ではない", ENV.is_admin ? "ok" : "warn"),
+    b(!String(ENV.ocr_engine).startsWith("使用不可"), `OCR: ${ENV.ocr_engine}`),
+    b(nref === 3, `参照画像 ${nref}/3`, nref === 3 ? "ok" : "warn"),
+  ].join("");
+  if (!document.activeElement || document.activeElement.id !== "iterInput") {
+    if (!loadEnv.once) { $("#iterInput").value = ENV.last_iterations || 10; loadEnv.once = true; }
+  }
+}
+
+// ---------------- セッション一覧（各セレクト） ----------------
+let SESSIONS = [];
+async function refreshSessions() {
+  SESSIONS = (await api("/api/auto/sessions")).sessions;
+  const opts = SESSIONS.map(s => `<option value="${s.id}">${s.id}（${s.iterations}回${s.flagged ? `・要確認${s.flagged}` : ""}）</option>`).join("");
+  const keep = (sel, extra) => { const v = sel.value; sel.innerHTML = extra + opts; if ([...sel.options].some(o => o.value === v)) sel.value = v; };
+  keep($("#runSession"), `<option value="">新しいセッション</option>`);
+  keep($("#liveSession"), ``);
+  keep($("#revSession"), ``);
+}
+
+// ---------------- 実行 ----------------
+$("#btnStart").onclick = async () => {
+  const sid = $("#runSession").value || null;
+  if (sid) {
+    // 既存セッションに追加：先に編成が同じか確認し，違えば続けるか尋ねる
+    let chk;
+    try { chk = await api("/api/auto/lineup_check", {method: "POST", body: {session_id: sid}}); }
+    catch (e) { alert("開始できません: " + e.message); return; }
+    if (chk.changed.length) {
+      const slots = chk.changed.map(i => `ステージ${Math.floor(i / 3) + 1}・枠${i % 3 + 1}`).join("，");
+      alert(`編成がセッション開始時と違うため，このセッションには追加できません（${slots}）．\n\n` +
+            `保存先を「新しいセッション」にして周回し，あとで「📁 セッション」タブの「🔗 結合」でまとめてください．`);
+      return;
+    }
+  }
+  try {
+    await api("/api/auto/start", {method: "POST", body: {iterations: +$("#iterInput").value, session_id: sid}});
+  } catch (e) { alert("開始できません: " + e.message); }
+  poll();
+};
+
+$("#btnAbort").onclick = () => api("/api/auto/abort", {method: "POST"});
+
+let lastSig = "";
+async function poll() {
+  let st;
+  try { st = await api("/api/auto/status"); } catch { return; }
+  $("#stState").textContent = st.running ? st.state_label : (st.error ? "停止（エラー）" : "待機中");
+  $("#stMsg").textContent = st.message || "";
+  $("#stSession").textContent = st.session ? `session ${st.session}` : "";
+  $("#stDone").textContent = st.target ? `${st.completed}/${st.target}` : "-";
+  $("#stBar").style.width = st.target ? `${100 * st.completed / st.target}%` : "0%";
+  $("#stElapsed").textContent = sec(st.elapsed_sec);
+  $("#stAvg").textContent = st.avg_iteration_sec ? st.avg_iteration_sec + "s" : "-";
+  $("#stEta").textContent = sec(st.eta_sec);
+  $("#stError").classList.toggle("hidden", !st.error);
+  $("#stError").textContent = st.error || "";
+  $("#btnStart").disabled = st.running; $("#btnStart").classList.toggle("opacity-50", st.running);
+  const box = $("#logBox"); const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 10;
+  box.textContent = st.log.join("\n"); if (atBottom) box.scrollTop = box.scrollHeight;
+  if (st.last_result) renderLast(st.last_result);
+
+  const sig = `${st.session}|${st.last_result?.iteration}|${st.running}`;
+  if (sig !== lastSig) {
+    lastSig = sig;
+    await refreshSessions();
+    if (st.session) $("#liveSession").value = st.session;
+    loadLive();
+  }
+}
+
+function renderLast(r) {
+  const cls = STATUS_CLASS[r.status];
+  $("#lastResult").innerHTML = `<div class="mb-1">#${r.iteration} <span class="badge ${cls}">${STATUS_LABEL[r.status]}</span> <span class="text-slate-400">${esc(r.flags)}</span></div>` +
+    `<table class="sheet w-full num"><tr class="bg-slate-50"><th></th><th>C1</th><th>C2</th><th>C3</th><th>ボーナス</th><th>合計</th></tr>` +
+    r.stages.map((s, i) => `<tr><th>S${i+1}</th>${s.scores.map(v => `<td class="text-right">${fmt(v)}</td>`).join("")}<td class="text-right text-sky-600">${fmt(s.bonus)}</td><td class="text-right font-bold">${fmt(s.total)}</td></tr>`).join("") + `</table>`;
+}
+
+$("#liveSession").onchange = loadLive;
+$("#btnCsv").onclick = () => { const sid = $("#liveSession").value; if (sid) location.href = `/api/auto/sessions/${sid}/download/results`; };
+async function loadLive() {
+  const sid = $("#liveSession").value;
+  if (!sid) { $("#liveCaption").textContent = "セッションがありません"; return; }
+  const st = await api(`/api/auto/sessions/${sid}/stats`);
+  $("#liveCaption").textContent = `session ${sid} ・ 集計 ${st.used} 回 / 全 ${st.iterations} 回` + (st.flagged ? ` ・ 要確認 ${st.flagged} 件（除外中）` : "");
+  drawBoxplot(sid, st);
+  const rows = [["平均 (Ave)","avg"],["中央値","median"],["最大","max"],["最小","min"],["Q1","q1"],["Q3","q3"],["標準偏差","std"],["N","n"]];
+  $("#statTable").innerHTML = `<tr class="bg-slate-50"><th></th>${COLS.map(c => `<th class="${c.endsWith("C1") && c !== "S1C1" ? "border-l-2 border-l-slate-400" : ""}">${c}</th>`).join("")}</tr>` +
+    rows.map(([lab, k]) => `<tr><th class="text-left bg-slate-50">${lab}</th>${COLS.map(c => `<td class="text-right ${k === "avg" ? "font-bold bg-yellow-50" : ""}">${fmt(st.columns[c][k])}</td>`).join("")}</tr>`).join("");
+  $("#stageTable").innerHTML = `<tr class="bg-slate-50"><th></th><th>平均</th><th>中央値</th><th>最大</th><th>最小</th></tr>` +
+    [...["S1","S2","S3"].map(s => [s.replace("S","ステージ"), st.stage_totals[s]]), ["3ステージ計", st.grand_total]]
+      .map(([n, d]) => `<tr><th class="text-left">${n}</th><td class="text-right font-bold">${fmt(d.avg)}</td><td class="text-right">${fmt(d.median)}</td><td class="text-right">${fmt(d.max)}</td><td class="text-right">${fmt(d.min)}</td></tr>`).join("");
+}
+
+function drawBoxplot(sid, st) {
+  const W = 980, H = 380, L = 70, R = 16, T = 64, B = 34;
+  const cs = COLS.map(c => st.columns[c]).filter(d => d.n);
+  if (!cs.length) { $("#boxplot").innerHTML = `<div class="text-xs text-slate-400 py-10 text-center">データがまだありません</div>`; return; }
+  let lo = Math.min(...cs.map(d => d.min)), hi = Math.max(...cs.map(d => d.max));
+  const pad = (hi - lo) * 0.06 || hi * 0.05 || 1; lo = Math.max(0, lo - pad); hi += pad;
+  const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const step = (W - L - R) / 9, colors = ["#ec4899","#8b5cf6","#0ea5e9"];
+  let g = "";
+  for (let i = 0; i <= 4; i++) { const v = lo + (hi - lo) * i / 4; g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#e2e8f0"/><text x="${L-6}" y="${y(v)+4}" font-size="11" text-anchor="end" fill="#64748b">${fmt(v)}</text>`; }
+  [3, 6].forEach(k => g += `<line x1="${L+step*k}" x2="${L+step*k}" y1="${T-56}" y2="${H-B}" stroke="#94a3b8" stroke-dasharray="4 3"/>`);
+  COLS.forEach((c, i) => {
+    const d = st.columns[c], cx = L + step * (i + .5), bw = step * .42, col = colors[Math.floor(i/3)];
+    g += `<image href="/api/auto/sessions/${sid}/icon/${i}" x="${cx-22}" y="${T-60}" width="44" height="44" preserveAspectRatio="xMidYMid slice" onerror="this.remove()"/>`;
+    g += `<text x="${cx}" y="${H-B+16}" font-size="11" text-anchor="middle" fill="#334155">${c}</text>`;
+    if (!d.n) return;
+    g += `<line x1="${cx}" x2="${cx}" y1="${y(d.max)}" y2="${y(d.q3)}" stroke="${col}"/><line x1="${cx}" x2="${cx}" y1="${y(d.q1)}" y2="${y(d.min)}" stroke="${col}"/>`;
+    g += `<line x1="${cx-bw/3}" x2="${cx+bw/3}" y1="${y(d.max)}" y2="${y(d.max)}" stroke="${col}"/><line x1="${cx-bw/3}" x2="${cx+bw/3}" y1="${y(d.min)}" y2="${y(d.min)}" stroke="${col}"/>`;
+    g += `<rect x="${cx-bw/2}" y="${y(d.q3)}" width="${bw}" height="${Math.max(1, y(d.q1)-y(d.q3))}" fill="${col}22" stroke="${col}"/>`;
+    g += `<line x1="${cx-bw/2}" x2="${cx+bw/2}" y1="${y(d.median)}" y2="${y(d.median)}" stroke="${col}" stroke-width="2"/>`;
+    g += `<circle cx="${cx}" cy="${y(d.avg)}" r="3.5" fill="#fff" stroke="#0f172a"/>`;
+    g += `<text x="${cx+bw/2+3}" y="${y(d.avg)+4}" font-size="10" fill="#0f172a">${fmt(d.avg)}</text>`;
+  });
+  $("#boxplot").innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="w-full min-w-[720px]">${g}</svg><div class="text-[11px] text-slate-500">箱＝Q1〜Q3，太線＝中央値，○＝平均，ひげ＝最小〜最大</div>`;
+}
+
+// ---------------- レビュー ----------------
+let REV = {sid: null, rows: [], filter: "flagged"};
+const FILTERS = [["flagged","要確認"],["repaired","自動補正"],["manual","手修正"],["ok","OK"],["all","すべて"]];
+$("#revFilters").innerHTML = FILTERS.map(([k, l]) => `<button data-f="${k}" class="revF border px-2 py-1 rounded-lg">${l}</button>`).join("");
+document.querySelectorAll(".revF").forEach(b => b.onclick = () => { REV.filter = b.dataset.f; renderReview(); });
+$("#revSession").onchange = loadReview;
+$("#revSearch").oninput = renderReview;
+
+async function loadReview() {
+  await refreshSessions();
+  const sid = $("#revSession").value; if (!sid) return;
+  REV.sid = sid; REV.rows = (await api(`/api/auto/sessions/${sid}/rows`)).rows;
+  renderReview();
+}
+function renderReview() {
+  document.querySelectorAll(".revF").forEach(b => {
+    const on = b.dataset.f === REV.filter;
+    b.classList.toggle("bg-pink-600", on); b.classList.toggle("text-white", on);
+  });
+  const q = $("#revSearch").value.trim().replace(/,/g, "");
+  const rows = REV.rows.filter(r => (REV.filter === "all" || r.status === REV.filter || (REV.filter === "ok" && r.status === "verified"))
+    && (!q || String(r.iteration) === q || JSON.stringify(r).includes(q)));
+  const counts = {}; REV.rows.forEach(r => counts[r.status] = (counts[r.status] || 0) + 1);
+  $("#revInfo").textContent = Object.entries(counts).map(([k, v]) => `${STATUS_LABEL[k] || k} ${v}`).join(" ・ ");
+  const head = `<tr class="bg-slate-50"><th>#</th><th>状態</th>${[1,2,3].map(s => `<th>ステージ${s}</th><th>C1</th><th>C2</th><th>C3</th><th>ボーナス</th><th>合計</th><th>検算</th>`).join("")}<th></th></tr>`;
+  const cell = (r, k) => `<td><input data-it="${r.iteration}" data-k="${k}" value="${r[k] ?? ""}"></td>`;
+  $("#revTable").innerHTML = head + rows.map(r => `<tr data-row="${r.iteration}">
+    <td><a class="text-pink-700 hover:underline" target="_blank" href="/api/auto/sessions/${REV.sid}/screenshot/${r.iteration}">${r.iteration}</a></td>
+    <td><span class="badge ${STATUS_CLASS[r.status] || "muted"}">${STATUS_LABEL[r.status] || r.status}</span><div class="text-[10px] text-slate-400 max-w-[120px] truncate" title="${esc(r.flags)}">${esc(r.flags)}</div></td>
+    ${[1,2,3].map(s => `<td class="p-0"><img loading="lazy" class="h-14" src="/api/auto/sessions/${REV.sid}/crop/${r.iteration}/${s}"></td>${cell(r,`S${s}C1`)}${cell(r,`S${s}C2`)}${cell(r,`S${s}C3`)}${cell(r,`S${s}_bonus`)}${cell(r,`S${s}_total`)}<td class="chk text-center" data-s="${s}"></td>`).join("")}
+    <td>${r.status === "flagged" || r.status === "repaired" ? `<button class="verify text-[11px] border px-2 py-0.5 rounded hover:bg-slate-50" data-it="${r.iteration}">確認済にする</button>` : ""}</td>
+  </tr>`).join("");
+  document.querySelectorAll("#revTable tr[data-row]").forEach(updateCheck);
+  document.querySelectorAll("#revTable input").forEach(inp => inp.oninput = () => { inp.classList.add("changed"); updateCheck(inp.closest("tr")); });
+  document.querySelectorAll(".verify").forEach(b => b.onclick = async () => { await api(`/api/auto/sessions/${REV.sid}/verify/${b.dataset.it}`, {method: "POST"}); loadReview(); });
+}
+function updateCheck(tr) {
+  const v = k => { const i = tr.querySelector(`input[data-k="${k}"]`); return i && i.value !== "" ? +i.value.replace(/,/g, "") : null; };
+  tr.querySelectorAll(".chk").forEach(td => {
+    const s = td.dataset.s, sc = [1,2,3].map(c => v(`S${s}C${c}`) ?? 0), t = v(`S${s}_total`) ?? 0;
+    // 合計 = 3 人 + 最高スコア÷5（空き枠は 0）
+    const ok = sc.reduce((a, x) => a + x, 0) + Math.floor(Math.max(...sc) / 5) === t;
+    td.innerHTML = ok ? `<span class="text-emerald-600">✔</span>` : `<span class="text-red-600" title="差 ${fmt(t - sc.reduce((a,x)=>a+x,0) - Math.floor(Math.max(...sc) / 5))}">✖</span>`;
+  });
+}
+$("#revSave").onclick = async () => {
+  const edited = {};
+  document.querySelectorAll("#revTable input.changed").forEach(i => { (edited[i.dataset.it] ||= {iteration: +i.dataset.it})[i.dataset.k] = i.value; });
+  const rows = Object.values(edited);
+  if (!rows.length) return alert("変更はありません");
+  const r = await api(`/api/auto/sessions/${REV.sid}/rows`, {method: "POST", body: {rows}});
+  await api(`/api/auto/sessions/${REV.sid}/charts`, {method: "POST"}).catch(() => {});
+  alert(`${r.changed} 行を保存しました（統計・グラフも更新）`);
+  loadReview();
+};
+
+// ---------------- 設定・キャリブレーション ----------------
+let CFG = null, previewTimer = null;
+const SETTINGS = [
+  ["window_title","ウィンドウ名","text"],
+  ["capture_method","キャプチャ方式","select",["auto","printwindow","screen"]],
+  ["click_method","クリック方式","select",["postmessage","sendinput"]],
+  ["match_threshold","類似度しきい値 (0〜1)","number",0.01],
+  ["confirm_count","連続一致回数","number",1],
+  ["poll_interval_ms","判定間隔 (ms)","number",50],
+  ["page_timeout_ms","リハーサル画面待ち上限 (ms)","number",1000],
+  ["loading_timeout_ms","準備中もスキップも見えない時の上限 (ms)","number",1000],
+  ["prepare_timeout_ms","「準備中」表示の上限 (ms, 0=無制限)","number",1000],
+  ["preparing.white_min","「準備中」判定の白画素割合","number",0.01],
+  ["result_timeout_ms","結果画面待ち上限 (ms)","number",1000],
+  ["capture_delay_ms","撮影前の待ち (ms)","number",50],
+  ["max_click_retries","再クリック回数","number",1],
+  ["click_retry_interval_ms","再クリック間隔 (ms)","number",100],
+  ["buttons.skip.brightness_min","スキップ判定の明るさ下限","number",1],
+  ["ocr.engine","読み取り方式","select",["auto","template","winocr","tesseract"]],
+  ["ocr.score_threshold","スコア二値化しきい値","number",1],
+  ["ocr.total_threshold","合計二値化しきい値","number",1],
+  ["lineup_threshold","編成チェックしきい値","number",1],
+];
+const getPath = (o, p) => p.split(".").reduce((a, k) => a?.[k], o);
+const setPath = (o, p, v) => { const ks = p.split("."); let a = o; ks.slice(0, -1).forEach(k => a = a[k] ||= {}); a[ks.at(-1)] = v; };
+
+async function loadConfig() {
+  CFG = await api("/api/auto/config");
+  $("#settingsForm").innerHTML = SETTINGS.map(([k, label, type, extra]) => {
+    const v = getPath(CFG, k);
+    const input = type === "select"
+      ? `<select data-k="${k}" class="border rounded px-1.5 py-1 w-full">${extra.map(o => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`
+      : `<input data-k="${k}" type="${type}" ${type === "number" ? `step="${extra}"` : ""} value="${esc(v)}" class="border rounded px-1.5 py-1 w-full num">`;
+    return `<label class="text-slate-600">${label}${input}</label>`;
+  }).join("");
+  $("#cfgJson").value = JSON.stringify(CFG, null, 2);
+  renderRefs(); drawOverlay();
+}
+function renderRefs() {
+  const names = {start: "開始する", skip: "スキップ", end: "終了"};
+  $("#refCards").innerHTML = Object.entries(names).map(([b, n]) => `
+    <div class="border rounded-lg p-2 text-xs space-y-1">
+      <div class="font-bold">${n}</div>
+      <div class="h-12 bg-slate-100 rounded flex items-center justify-center overflow-hidden">
+        <img src="/api/auto/reference/${b}?t=${Date.now()}" class="max-h-12" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'未撮影',className:'text-slate-400'}))"></div>
+      <button class="takeRef w-full bg-slate-800 text-white rounded py-1" data-b="${b}">📸 撮影</button>
+    </div>`).join("");
+  document.querySelectorAll(".takeRef").forEach(btn => btn.onclick = async () => {
+    try { await api(`/api/auto/reference/${btn.dataset.b}`, {method: "POST"}); renderRefs(); loadEnv(); refreshPreview(); }
+    catch (e) { alert(e.message); }
+  });
+}
+function collectSettings() {
+  let cfg;
+  try { cfg = JSON.parse($("#cfgJson").value); } catch (e) { throw new Error("JSON の書式が正しくありません: " + e.message); }
+  document.querySelectorAll("#settingsForm [data-k]").forEach(el => {
+    const t = SETTINGS.find(s => s[0] === el.dataset.k)[2];
+    setPath(cfg, el.dataset.k, t === "number" ? +el.value : el.value);
+  });
+  return cfg;
+}
+$("#btnSaveCfg").onclick = async () => {
+  try { CFG = await api("/api/auto/config", {method: "POST", body: collectSettings()}); $("#cfgMsg").textContent = "保存しました"; loadConfig(); loadEnv(); }
+  catch (e) { $("#cfgMsg").textContent = "保存失敗: " + e.message; }
+};
+$("#btnResetCfg").onclick = async () => { if (confirm("設定を既定値に戻しますか？（参照画像は残ります）")) { await api("/api/auto/config/reset", {method: "POST"}); loadConfig(); } };
+
+async function refreshPreview() {
+  try {
+    const r = await fetch("/api/auto/preview?t=" + Date.now());
+    if (!r.ok) throw new Error((await r.json()).detail);
+    const url = URL.createObjectURL(await r.blob());
+    const img = $("#calibImg"); const old = img.src; img.src = url; img.onload = () => { if (old.startsWith("blob:")) URL.revokeObjectURL(old); drawOverlay(); };
+    $("#calibMsg").textContent = "";
+  } catch (e) { $("#calibMsg").textContent = "取得失敗: " + e.message; }
+}
+$("#btnPreview").onclick = refreshPreview;
+$("#autoPreview").onchange = e => { clearInterval(previewTimer); if (e.target.checked) previewTimer = setInterval(refreshPreview, 1000); };
+$("#showOcr").onchange = drawOverlay; $("#showIcons").onchange = drawOverlay; $("#editTarget").onchange = drawOverlay;
+
+function drawOverlay() {
+  const img = $("#calibImg"), svg = $("#calibSvg");
+  if (!CFG || !img.naturalWidth) { svg.innerHTML = ""; return; }
+  svg.setAttribute("viewBox", "0 0 1000 1000"); svg.setAttribute("preserveAspectRatio", "none");
+  const rect = (r, col, label, w = 2) => `<rect x="${r[0]*1000}" y="${r[1]*1000}" width="${r[2]*1000}" height="${r[3]*1000}" fill="${col}22" stroke="${col}" stroke-width="${w}" vector-effect="non-scaling-stroke"/>` +
+    (label ? `<text x="${r[0]*1000}" y="${r[1]*1000-3}" font-size="14" fill="${col}" style="paint-order:stroke;stroke:#fff;stroke-width:3px">${label}</text>` : "");
+  const dot = (p, col) => `<circle cx="${p[0]*1000}" cy="${p[1]*1000}" r="7" fill="${col}" stroke="#fff" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  const col = {start: "#f97316", skip: "#22c55e", end: "#e11d48", confirm: "#8b5cf6"};
+  let g = "";
+  for (const b of ["start", "skip", "end", "confirm"]) { if (!CFG.buttons[b]) continue; g += rect(CFG.buttons[b].region, col[b], b, 2.5); g += dot(CFG.buttons[b].click, col[b]); }
+  g += rect(CFG.preparing.region, "#eab308", "準備中", 1.5);
+  if ($("#showOcr").checked) {
+    CFG.regions.score.forEach((r, i) => {
+      const cols = CFG.regions.score_columns;
+      for (let c = 0; c < 3; c++) g += rect([cols[c], r[1], cols[c+1]-cols[c], r[3]], "#0ea5e9", c === 0 ? `S${i+1}` : "", 1);
+    });
+    CFG.regions.total.forEach(r => g += rect(r, "#6366f1", "", 1));
+    CFG.regions.bonus.forEach(r => g += rect(r, "#06b6d4", "", 1));
+  }
+  if ($("#showIcons").checked) CFG.regions.icons.forEach((r, i) => g += rect(r, "#a855f7", `S${Math.floor(i/3)+1}C${i%3+1}`, 1));
+  svg.innerHTML = g + `<rect id="dragRect" fill="#db277733" stroke="#db2777" stroke-width="2" vector-effect="non-scaling-stroke" visibility="hidden"/>`;
+}
+
+// ドラッグで領域・クリックで位置を設定
+(() => {
+  const svg = $("#calibSvg"); let start = null;
+  const rel = e => { const b = svg.getBoundingClientRect(); return [Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), Math.min(1, Math.max(0, (e.clientY - b.top) / b.height))]; };
+  const round = v => Math.round(v * 1000) / 1000;
+  svg.addEventListener("mousedown", e => { if (!$("#editTarget").value || !CFG) return; start = rel(e); });
+  svg.addEventListener("mousemove", e => {
+    if (!start) return; const p = rel(e), r = $("#dragRect");
+    r.setAttribute("visibility", "visible");
+    r.setAttribute("x", Math.min(start[0], p[0]) * 1000); r.setAttribute("y", Math.min(start[1], p[1]) * 1000);
+    r.setAttribute("width", Math.abs(p[0] - start[0]) * 1000); r.setAttribute("height", Math.abs(p[1] - start[1]) * 1000);
+  });
+  window.addEventListener("mouseup", e => {
+    if (!start) return; const p = rel(e), [b, kind] = $("#editTarget").value.split(".");
+    const target = b === "preparing" ? CFG.preparing : CFG.buttons[b];
+    if (kind === "click") target.click = [round(p[0]), round(p[1])];
+    else {
+      const w = Math.abs(p[0] - start[0]), h = Math.abs(p[1] - start[1]);
+      if (w > 0.005 && h > 0.005) target.region = [round(Math.min(start[0], p[0])), round(Math.min(start[1], p[1])), round(w), round(h)];
+    }
+    start = null; $("#cfgJson").value = JSON.stringify(CFG, null, 2); drawOverlay();
+    $("#calibMsg").innerHTML = `<b>${b}.${kind}</b> を更新しました．「設定を保存」で反映します（領域を変えたら参照画像も撮り直してください）．`;
+  });
+})();
+
+$("#btnDetect").onclick = async () => {
+  try {
+    const d = await api("/api/auto/detect");
+    $("#detectOut").innerHTML = Object.values(d).map(x => `<span class="badge ${x.visible ? "ok" : "muted"} mr-1">${x.button}: ${x.visible ? "見えている" : "なし"}
+      ${x.similarity != null ? ` 類似度${x.similarity}` : ""}${x.orange_ratio != null ? ` 色${x.orange_ratio}` : ""}${x.white_ratio != null ? ` 白${x.white_ratio}` : ""}${x.cancel_white != null ? ` キャンセル白${x.cancel_white}` : ""}${x.brightness != null ? ` 明るさ${x.brightness}` : ""}</span>`).join("");
+  } catch (e) { $("#detectOut").textContent = e.message; }
+};
+document.querySelectorAll(".clickTest").forEach(b => b.onclick = async () => {
+  try { const r = await api("/api/auto/click_test", {method: "POST", body: {button: b.dataset.b}}); $("#testOut").textContent = `クリック送信: (${r.x}, ${r.y}) / ${r.method}`; }
+  catch (e) { $("#testOut").textContent = e.message; }
+});
+function showOcr(r) {
+  $("#testOut").innerHTML = `<div class="mb-1"><span class="badge ${STATUS_CLASS[r.status]}">${STATUS_LABEL[r.status]}</span> ${esc(r.flags)}</div>` +
+    `<table class="sheet num"><tr class="bg-slate-50"><th></th><th>C1</th><th>C2</th><th>C3</th><th>ボーナス</th><th>合計</th><th>状態</th></tr>` +
+    r.stages.map((s, i) => `<tr><th>S${i+1}</th>${s.scores.map(v => `<td class="text-right">${fmt(v)}</td>`).join("")}<td class="text-right">${fmt(s.bonus)}</td><td class="text-right font-bold">${fmt(s.total)}</td><td>${STATUS_LABEL[s.status]}</td></tr>`).join("") + "</table>";
+}
+$("#btnOcrTest").onclick = async () => { $("#testOut").textContent = "OCR 中…"; try { showOcr(await api("/api/auto/ocr_test", {method: "POST", body: {}})); } catch (e) { $("#testOut").textContent = e.message; } };
+$("#btnOcrPaste").onclick = () => { $("#testOut").textContent = "結果画面のスクショを Ctrl+V で貼り付けてください"; };
+document.addEventListener("paste", e => {
+  if ($("#tab-calib").classList.contains("hidden")) return;
+  const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith("image/")); if (!item) return;
+  const fr = new FileReader();
+  fr.onload = async () => { $("#testOut").textContent = "OCR 中…"; try { showOcr(await api("/api/auto/ocr_test", {method: "POST", body: {image_base64: fr.result}})); } catch (err) { $("#testOut").textContent = err.message; } };
+  fr.readAsDataURL(item.getAsFile());
+});
+
+// ---------------- セッション ----------------
+// ---------------- 結合 ----------------
+let MG = null;
+function mgFillSelects() {
+  const opts = SESSIONS.map(x => `<option value="${x.id}">${x.id}（${x.iterations}回）</option>`).join("");
+  for (const id of ["#mgBase", "#mgSource"]) {
+    const el = $(id), v = el.value; el.innerHTML = opts;
+    if ([...el.options].some(o => o.value === v)) el.value = v;
+  }
+  if ($("#mgBase").value === $("#mgSource").value && SESSIONS.length > 1) $("#mgSource").selectedIndex = 1;
+}
+$("#mgSuggest").onclick = async () => {
+  const base = $("#mgBase").value, source = $("#mgSource").value;
+  try { MG = {base, source, ...(await api("/api/auto/merge_suggest", {method: "POST", body: {base, source}}))}; }
+  catch (e) { alert(e.message); return; }
+  const t = Date.now(), icon = (sid, i) => `<img class="h-10 rounded" src="/api/auto/sessions/${sid}/icon/${i}?t=${t}" onerror="this.style.visibility='hidden'">`;
+  $("#mgStages").innerHTML = [0, 1, 2].map(st => `<div class="border rounded-lg p-2 space-y-2"><div class="text-xs font-bold">結合先 ステージ${st + 1}</div>` +
+    [0, 1, 2].map(c => {
+      const j = st * 3 + c;
+      const opts = `<option value="">（足さない）</option>` + [...Array(9).keys()].filter(i => MG.source_counts[i] > 0)
+        .map(i => `<option value="${i}" ${MG.mapping[j] === i ? "selected" : ""}>結合元 S${Math.floor(i / 3) + 1}C${i % 3 + 1}（${MG.source_counts[i]}件）</option>`).join("");
+      return `<div class="flex items-center gap-2 text-xs">
+        <span class="w-8 font-semibold text-slate-500">枠${c + 1}</span>${icon(base, j)}
+        <span class="text-slate-400">←</span>
+        <select data-j="${j}" class="mgSel border rounded px-1 py-1 flex-1">${opts}</select>
+        <span class="mgSrcIcon w-8">${MG.mapping[j] != null ? icon(source, MG.mapping[j]) : ""}</span></div>`;
+    }).join("") + `</div>`).join("");
+  document.querySelectorAll(".mgSel").forEach(sel => sel.onchange = () => {
+    const v = sel.value === "" ? null : +sel.value;
+    MG.mapping[+sel.dataset.j] = v;
+    sel.parentElement.querySelector(".mgSrcIcon").innerHTML = v != null ? icon(source, v) : "";
+  });
+  $("#mgMsg").textContent = `結合先 ${MG.base_counts.reduce((a, b) => Math.max(a, b), 0)} 回分 ＋ 結合元 ${Math.max(...MG.source_counts)} 回分`;
+  $("#mgGrid").classList.remove("hidden");
+};
+$("#mgRun").onclick = async () => {
+  if (!MG) return;
+  const used = MG.mapping.filter(v => v != null);
+  if (new Set(used).size !== used.length && !confirm("結合元の同じ枠を 2 か所以上に足そうとしています．このまま結合しますか？")) return;
+  try {
+    const r = await api("/api/auto/merge", {method: "POST", body: {base: MG.base, source: MG.source, mapping: MG.mapping}});
+    $("#mgMsg").textContent = `新しいセッション ${r.session} を作りました（${r.rows} 回分）`;
+    await loadSessions();
+  } catch (e) { alert("結合できません: " + e.message); }
+};
+
+async function loadSessions() {
+  await refreshSessions();
+  mgFillSelects();
+  $("#sessTable").innerHTML = `<tr class="bg-slate-50"><th>セッション</th><th>周回数</th><th>要確認</th><th>編成画像</th><th></th></tr>` +
+    SESSIONS.map(s => `<tr><td class="font-mono">${s.id}</td><td class="text-right num">${s.iterations}</td><td class="text-right num ${s.flagged ? "text-red-600 font-bold" : ""}">${s.flagged}</td><td>${s.has_start_page ? "あり" : "-"}</td>
+      <td class="space-x-1"><button class="sCharts border px-2 py-0.5 rounded" data-s="${s.id}">グラフ</button><button class="sOpen border px-2 py-0.5 rounded" data-s="${s.id}">フォルダを開く</button>
+      <button class="sExtend border px-2 py-0.5 rounded" data-s="${s.id}">このセッションに追加で周回</button>
+      <button class="sReocr border px-2 py-0.5 rounded" data-s="${s.id}">スクショから読み直す</button>
+      <span class="text-slate-400 ml-1">CSV:</span>
+      <a class="text-pink-700 hover:underline" href="/api/auto/sessions/${s.id}/download/results">全項目</a>
+      <a class="text-pink-700 hover:underline" href="/api/auto/sessions/${s.id}/download/raw" title="ヘッダなし・1行9個（gktools のリハーサル集計にそのまま読み込める形式）">9列（gktools用）</a>
+      <a class="text-pink-700 hover:underline" href="/api/auto/sessions/${s.id}/download/stats">統計</a></td></tr>`).join("");
+  document.querySelectorAll(".sReocr").forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = "読み直し中…";
+    try {
+      const r = await api(`/api/auto/sessions/${b.dataset.s}/reocr`, {method: "POST"});
+      alert(`${r.iterations} 回分を読み直しました\n` + Object.entries(r.counts).map(([k, v]) => `${STATUS_LABEL[k] || k}: ${v}`).join("\n"));
+    } catch (e) { alert(e.message); }
+    loadSessions();
+  });
+  document.querySelectorAll(".sOpen").forEach(b => b.onclick = () => api(`/api/auto/sessions/${b.dataset.s}/open`, {method: "POST"}));
+  document.querySelectorAll(".sExtend").forEach(b => b.onclick = () => { $("#runSession").value = b.dataset.s; document.querySelector('[data-tab="run"]').click(); });
+  document.querySelectorAll(".sCharts").forEach(b => b.onclick = async () => {
+    $("#chartSess").textContent = "生成中…";
+    const r = await api(`/api/auto/sessions/${b.dataset.s}/charts`, {method: "POST"});
+    $("#chartSess").textContent = `session ${b.dataset.s}`;
+    $("#chartImgs").innerHTML = r.files.map(f => `<img class="border rounded" src="/api/auto/sessions/${b.dataset.s}/charts/${f}?t=${Date.now()}">`).join("");
+  });
+}
+
+// ---------------- 起動 ----------------
+loadEnv().then(() => {
+  let seen = false;
+  try { seen = localStorage.getItem("guideSeen") === "1"; localStorage.setItem("guideSeen", "1"); } catch (e) {}
+  const nref = Object.values(ENV.references || {}).filter(Boolean).length;
+  if (!seen && nref === 0) document.querySelector('[data-tab="guide"]').click();
+});
+setInterval(loadEnv, 5000);
+poll(); setInterval(poll, 1000);
+loadConfig();
+</script>
+</body>
+</html>
