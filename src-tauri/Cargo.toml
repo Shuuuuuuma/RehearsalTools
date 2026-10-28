@@ -1,0 +1,64 @@
+[package]
+name = "gakumas-rehearsal-tool"
+version = "2.0.0"
+description = "学マス リハーサル自動周回＆スコア集計ツール"
+edition = "2021"
+
+[[bin]]
+name = "GakumasRehearsalTool"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+csv = "1"
+chrono = "0.4"
+regex = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+rfd = "0.15"
+
+[dependencies.windows]
+version = "0.61"
+features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Storage_Streams",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_Xps",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_WinRT",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[features]
+# cargo build だけで（tauri CLI なしで）本番用の exe になるよう既定で有効にしておく
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+# 画像処理・数字の照合が遅すぎないよう，開発時も最適化する
+[profile.dev]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = true
+codegen-units = 1

@@ -1,1 +1,0 @@
-# gakumasu-tool package

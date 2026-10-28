@@ -6,8 +6,10 @@
 
 **[最新版の exe をダウンロード](../../releases/latest/download/GakumasRehearsalTool.exe)**（[リリース一覧](../../releases)）
 
-- ダウンロードした `GakumasRehearsalTool.exe` を好きなフォルダに置いて起動するだけで使えます（Python は不要）．
-- 起動するとブラウザで操作画面が開きます．詳しい使い方は画面の「📖 使い方」タブを見てください．
+- ダウンロードした `GakumasRehearsalTool.exe` を好きなフォルダに置いて起動するだけで使えます．
+- 起動するとツールのウィンドウが開きます．詳しい使い方は画面の「📖 使い方」タブを見てください．
+- 画面の表示に Windows 標準の WebView2 を使います（Windows 11 には入っています．Windows 10 で開かない場合は Microsoft の「WebView2 Runtime」を入れてください）．
+- Python 版（v1）の `automation_config.json` / `references` / `sessions` / `data` を exe の横に置けば，そのまま引き継げます．
 - 設定・参照画像・周回結果は exe と同じフォルダに保存されます．
 - 初回は Windows の警告（SmartScreen）が出ることがあります．「詳細情報」→「実行」で起動できます．
 
@@ -29,10 +31,13 @@
 
 ## ソースから動かす（開発者向け）
 
+[Tauri](https://tauri.app/) 製です．画面は `static/*.html`，裏側（キャプチャ・クリック・ホットキー・OCR・集計）は `src-tauri/src/*.rs` の Rust です．
+Rust と Visual Studio Build Tools（C++）が必要です（Node.js は不要）．
+
 ```powershell
-pip install -r requirements.txt
-python run_tool.py
+cd src-tauri
+cargo run              # 開発用に起動（設定・データはリポジトリのフォルダを使う．HTML の変更は再読み込みで反映）
+cargo build --release  # target\release\GakumasRehearsalTool.exe ができる
 ```
 
-exe を自分で作る場合は `build_exe.bat` を実行すると `dist\GakumasRehearsalTool.exe` ができます．
-v で始まるタグ（例 `v1.0.0`）を push すると，GitHub Actions が exe を作ってリリースに添付します．
+v で始まるタグ（例 `v2.0.0`）を push すると，GitHub Actions が exe を作ってリリースに添付します．
