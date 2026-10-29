@@ -1,4 +1,4 @@
-# v で始まるタグ（例: v1.0.0）を push すると，Windows で exe を作ってリリースに添付する
+# v で始まるタグ（例: v2.0.0）を push すると，Windows で exe を作ってリリースに添付する
 name: Build exe and release
 
 on:
@@ -15,27 +15,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - name: Build exe
-        run: python build_exe.py
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: GakumasRehearsalTool
-          path: dist/GakumasRehearsalTool.exe
+          path: src-tauri/target/release/GakumasRehearsalTool.exe
 
       - name: Create release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/GakumasRehearsalTool.exe
+          files: src-tauri/target/release/GakumasRehearsalTool.exe
           generate_release_notes: true

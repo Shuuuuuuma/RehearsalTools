@@ -69,9 +69,9 @@
           <span>📋</span> スクショ貼付 (Ctrl+V)
         </button>
 
-        <a href="/api/export_csv" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-medium text-xs px-3 py-2 rounded-lg transition-colors flex items-center gap-1" title="登録されている全スコアを CSV で保存">
+        <button onclick="saveDownload('/api/export_csv')" class="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-medium text-xs px-3 py-2 rounded-lg transition-colors flex items-center gap-1" title="登録されている全スコアを CSV で保存">
           <span>💾</span> CSV保存
-        </a>
+        </button>
 
         <!-- 自動検知スキャナーボタン（新機能！） -->
         <button id="btnAutoScan" onclick="toggleAutoScan()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm">
@@ -168,10 +168,21 @@
       <div id="statusMessage" class="font-medium text-slate-700">準備完了．学マス画面を表示してキャプチャまたは自動検知スキャンを開始してください．</div>
       <div class="flex items-center gap-3">
         <button onclick="resetData()" class="text-red-500 hover:text-red-700 underline font-medium">全試行データ消去</button>
-        <a href="/api/trials" target="_blank" class="text-blue-500 hover:underline">RAWログ表示</a>
+        <button onclick="toggleRawLog()" class="text-blue-500 hover:underline">RAWログ表示</button>
       </div>
     </div>
 
+  </div>
+
+  <!-- RAW ログ（直近 50 件） -->
+  <div id="rawModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl max-w-3xl w-full p-4 space-y-3">
+      <div class="flex items-center justify-between border-b pb-2">
+        <h3 class="text-sm font-bold text-slate-800">RAWログ（直近 50 件）</h3>
+        <button onclick="toggleRawLog()" class="text-slate-400 hover:text-slate-600 text-lg">✕</button>
+      </div>
+      <pre id="rawLog" class="text-[11px] bg-slate-50 rounded-lg p-3 max-h-[65vh] overflow-auto"></pre>
+    </div>
   </div>
 
   <!-- キャプチャプレビューモーダル -->
@@ -206,6 +217,26 @@
       await fetchWindows();
       await refreshCurrentView();
     });
+
+    // CSV は保存ダイアログを出して保存する（Tauri の画面ではリンクからのダウンロードができないため）
+    async function saveDownload(path, opt) {
+      try {
+        const res = await fetch(path, opt);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        if (data.saved) alert(`保存しました: ${data.saved}`);
+      } catch (e) { alert("保存できません: " + e.message); }
+    }
+
+    async function toggleRawLog() {
+      const m = document.getElementById("rawModal");
+      const open = m.classList.contains("hidden");
+      m.classList.toggle("hidden", !open); m.classList.toggle("flex", open);
+      if (open) {
+        try { document.getElementById("rawLog").textContent = JSON.stringify(await (await fetch("/api/trials")).json(), null, 2); }
+        catch (e) { document.getElementById("rawLog").textContent = String(e); }
+      }
+    }
 
     function togglePreviewModal() {
       const m = document.getElementById("previewModal");
@@ -734,8 +765,8 @@
       document.getElementById("rhDownload").addEventListener("click", () => {
         if (!RH.rows.length) return;
         const csv = RH.rows.map(r => r.scores.map(s => s.join(",")).join(",")).join("\n");
-        const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-        a.download = "rehearsal_data.csv"; a.click(); URL.revokeObjectURL(a.href);
+        saveDownload("/api/save_text", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "rehearsal_data.csv", content: csv }) });
       });
       const card = document.getElementById("rehearsalCard"), drop = document.getElementById("rhDrop");
       let depth = 0;

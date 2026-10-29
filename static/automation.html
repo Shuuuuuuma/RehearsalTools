@@ -228,8 +228,8 @@
       <h3 id="g-start">1. はじめる前に</h3>
       <ul>
         <li>Windows 10 / 11 と，PC 版の学マス（ウィンドウ名「gakumas」）が必要です．</li>
-        <li>このページは，ツールの黒い画面が開いている間だけ使えます．<b>黒い画面を閉じるとツールも終了</b>します．</li>
-        <li>画面の見た目やグラフの部品をインターネットから読み込むので，ネットにつながった状態で使ってください．</li>
+        <li>ツールのウィンドウを閉じると，自動周回もホットキーも止まります．</li>
+        <li>画面の見た目の部品をインターネットから読み込むので，ネットにつながった状態で使ってください．</li>
         <li>設定・参照画像・周回結果は，ツール（exe）と同じフォルダに保存されます．</li>
         <li>画面上部のバッジで状態が分かります：<span class="badge ok">ゲーム検出</span> <span class="badge warn">管理者ではない</span> <span class="badge ok">OCR: template</span> <span class="badge warn">参照画像 0/3</span></li>
       </ul>
@@ -277,7 +277,7 @@
         <li>データは「ダッシュボードの全データ」「周回セッション（1 回ずつ）」「CSV 読込」から選べます．CSV はカードにドロップしても読み込めます．</li>
         <li><b>CSV の保存</b>：「📁 セッション」タブの「CSV: 全項目／9列（gktools用）／統計」，またはダッシュボードの「💾 CSV」．
           「9列（gktools用）」は <a href="https://gktools.unoeins.org/rehearsal" target="_blank" rel="noopener">gktools のリハーサル集計</a> にそのまま読み込めます．</li>
-        <li>周回結果は <code>sessions\日時\</code> フォルダにもあります（結果画面のスクショ・CSV・グラフ画像）．「フォルダを開く」ですぐ開けます．</li>
+        <li>周回結果は <code>sessions\日時\</code> フォルダにもあります（結果画面のスクショ・CSV・統計）．「フォルダを開く」ですぐ開けます．グラフは「グラフ」ボタンでこの画面に表示します．</li>
       </ul>
 
       <h3 id="g-merge">6. 編成を変えたとき（セッションの結合）</h3>
@@ -299,7 +299,6 @@
         <dt>途中で止まる</dt><dd>ログに理由が出ます．止まった瞬間の画面がセッションフォルダに <code>stopped_時刻.png</code> として保存され，各ボタンの判定結果もログに出るので，参照画像の撮り直しや領域の調整の手がかりにしてください．</dd>
         <dt>「ゲーム未検出」になる</dt><dd>ゲームを起動し，最小化していないか確認．ウィンドウ名が違う場合は動作設定の「ウィンドウ名」を変更．</dd>
         <dt>読み取りが要確認ばかり</dt><dd>「今の画面で OCR」で確認し，OCR 領域（設定画面の青い枠）が数字に重なっているか確認．Windows の拡大率やウィンドウサイズを変えた後は参照画像も撮り直してください．</dd>
-        <dt>赤い「プログラムが古い」表示が出る</dt><dd>ツールを閉じて起動し直してください．</dd>
         <dt>起動時に Windows の警告が出る</dt><dd>署名のないアプリのため表示されます．「詳細情報」→「実行」で起動できます．</dd>
       </dl>
 
@@ -336,7 +335,7 @@
       <div class="flex items-center gap-2 mb-2">
         <h3 class="font-bold text-sm">グラフ</h3><span id="chartSess" class="text-xs text-slate-500"></span>
       </div>
-      <div id="chartImgs" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
+      <div id="chartImgs" class="space-y-4"></div>
     </div>
   </section>
 </div>
@@ -360,6 +359,17 @@ async function api(path, opt = {}) {
   }
   return r.headers.get("content-type")?.includes("json") ? r.json() : r;
 }
+// CSV などは保存ダイアログを出して保存する（Tauri の画面ではリンクからのダウンロードができないため）
+async function saveDownload(path) {
+  try { const r = await api(path); if (r.saved) alert(`保存しました: ${r.saved}`); }
+  catch (e) { alert("保存できません: " + e.message); }
+}
+// 外部サイトへのリンクは既定のブラウザで開く
+document.addEventListener("click", e => {
+  const a = e.target.closest("a[target=_blank]");
+  if (!a || !/^https:/.test(a.href)) return;
+  e.preventDefault(); api("/api/open_url", {method: "POST", body: {url: a.href}});
+});
 
 // ---------------- タブ ----------------
 document.querySelectorAll(".tab-btn").forEach(b => b.onclick = () => {
@@ -375,10 +385,6 @@ let ENV = {};
 async function loadEnv() {
   try { ENV = await api("/api/auto/env"); } catch (e) { return; }
   const b = (ok, text, cls) => `<span class="badge ${cls || (ok ? "ok" : "ng")}">${text}</span>`;
-  const EXPECTED_VERSION = "2026-10-05.1";
-  if (ENV.version !== EXPECTED_VERSION && !document.getElementById("verWarn")) {
-    document.body.insertAdjacentHTML("afterbegin", `<div id="verWarn" class="max-w-[1600px] mx-auto mb-3 p-3 rounded-lg border ng text-sm font-bold">⚠ ツールのプログラムが古いまま動いています．ツールを閉じて <code>python run_tool.py</code> で起動し直してください（新しい機能が動きません）．</div>`);
-  }
   const refs = ENV.references || {};
   const nref = Object.values(refs).filter(Boolean).length;
   $("#envBadges").innerHTML = [
@@ -462,14 +468,14 @@ function renderLast(r) {
 }
 
 $("#liveSession").onchange = loadLive;
-$("#btnCsv").onclick = () => { const sid = $("#liveSession").value; if (sid) location.href = `/api/auto/sessions/${sid}/download/results`; };
+$("#btnCsv").onclick = () => { const sid = $("#liveSession").value; if (sid) saveDownload(`/api/auto/sessions/${sid}/download/results`); };
 async function loadLive() {
   const sid = $("#liveSession").value;
   if (!sid) { $("#liveCaption").textContent = "セッションがありません"; return; }
   const st = await api(`/api/auto/sessions/${sid}/stats`);
   $("#liveCaption").textContent = `session ${sid} ・ 集計 ${st.used} 回 / 全 ${st.iterations} 回` + (st.flagged ? ` ・ 要確認 ${st.flagged} 件（除外中）` : "");
-  drawBoxplot(sid, st);
-  const rows = [["平均 (Ave)","avg"],["中央値","median"],["最大","max"],["最小","min"],["Q1","q1"],["Q3","q3"],["標準偏差","std"],["N","n"]];
+  $("#boxplot").innerHTML = boxplotSvg(sid, st);
+  const rows =[["平均 (Ave)","avg"],["中央値","median"],["最大","max"],["最小","min"],["Q1","q1"],["Q3","q3"],["標準偏差","std"],["N","n"]];
   $("#statTable").innerHTML = `<tr class="bg-slate-50"><th></th>${COLS.map(c => `<th class="${c.endsWith("C1") && c !== "S1C1" ? "border-l-2 border-l-slate-400" : ""}">${c}</th>`).join("")}</tr>` +
     rows.map(([lab, k]) => `<tr><th class="text-left bg-slate-50">${lab}</th>${COLS.map(c => `<td class="text-right ${k === "avg" ? "font-bold bg-yellow-50" : ""}">${fmt(st.columns[c][k])}</td>`).join("")}</tr>`).join("");
   $("#stageTable").innerHTML = `<tr class="bg-slate-50"><th></th><th>平均</th><th>中央値</th><th>最大</th><th>最小</th></tr>` +
@@ -477,10 +483,10 @@ async function loadLive() {
       .map(([n, d]) => `<tr><th class="text-left">${n}</th><td class="text-right font-bold">${fmt(d.avg)}</td><td class="text-right">${fmt(d.median)}</td><td class="text-right">${fmt(d.max)}</td><td class="text-right">${fmt(d.min)}</td></tr>`).join("");
 }
 
-function drawBoxplot(sid, st) {
+function boxplotSvg(sid, st) {
   const W = 980, H = 380, L = 70, R = 16, T = 64, B = 34;
   const cs = COLS.map(c => st.columns[c]).filter(d => d.n);
-  if (!cs.length) { $("#boxplot").innerHTML = `<div class="text-xs text-slate-400 py-10 text-center">データがまだありません</div>`; return; }
+  if (!cs.length) return `<div class="text-xs text-slate-400 py-10 text-center">データがまだありません</div>`;
   let lo = Math.min(...cs.map(d => d.min)), hi = Math.max(...cs.map(d => d.max));
   const pad = (hi - lo) * 0.06 || hi * 0.05 || 1; lo = Math.max(0, lo - pad); hi += pad;
   const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
@@ -500,7 +506,50 @@ function drawBoxplot(sid, st) {
     g += `<circle cx="${cx}" cy="${y(d.avg)}" r="3.5" fill="#fff" stroke="#0f172a"/>`;
     g += `<text x="${cx+bw/2+3}" y="${y(d.avg)+4}" font-size="10" fill="#0f172a">${fmt(d.avg)}</text>`;
   });
-  $("#boxplot").innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="w-full min-w-[720px]">${g}</svg><div class="text-[11px] text-slate-500">箱＝Q1〜Q3，太線＝中央値，○＝平均，ひげ＝最小〜最大</div>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="w-full min-w-[720px]">${g}</svg><div class="text-[11px] text-slate-500">箱＝Q1〜Q3，太線＝中央値，○＝平均，ひげ＝最小〜最大</div>`;
+}
+
+// 列ごとのヒストグラム（平均・中央値の線つき）
+function histSvg(title, vals, d) {
+  const W = 460, H = 240, L = 44, R = 10, T = 26, B = 40;
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const nb = Math.min(30, Math.max(5, Math.floor(vals.length / 3))), w = (hi - lo) / nb || 1;
+  const counts = Array(nb).fill(0);
+  vals.forEach(v => counts[Math.min(nb - 1, Math.floor((v - lo) / w))]++);
+  const cmax = Math.max(...counts), x = v => L + (W - L - R) * (hi > lo ? (v - lo) / (hi - lo) : .5), y = c => H - B - (H - T - B) * c / cmax;
+  let g = `<text x="${W/2}" y="16" font-size="12" text-anchor="middle" font-weight="700" fill="#0f172a">${esc(title)}（n=${d.n}）</text>`;
+  for (let c = 0, step = Math.ceil(cmax / 4); c <= cmax; c += step) g += `<line x1="${L}" x2="${W-R}" y1="${y(c)}" y2="${y(c)}" stroke="#f1f5f9"/><text x="${L-5}" y="${y(c)+4}" font-size="10" text-anchor="end" fill="#64748b">${c}</text>`;
+  counts.forEach((c, i) => { const x0 = L + (W - L - R) * i / nb, bw = (W - L - R) / nb; g += `<rect x="${x0+.5}" y="${y(c)}" width="${Math.max(1, bw-1)}" height="${H-B-y(c)}" fill="#e05a8a"/>`; });
+  [[lo, "start"], [(lo + hi) / 2, "middle"], [hi, "end"]].forEach(([v, a]) => g += `<text x="${x(v)}" y="${H-B+14}" font-size="10" text-anchor="${a}" fill="#64748b">${fmt(v)}</text>`);
+  g += `<line x1="${x(d.avg)}" x2="${x(d.avg)}" y1="${T}" y2="${H-B}" stroke="#333" stroke-dasharray="5 3"/><line x1="${x(d.median)}" x2="${x(d.median)}" y1="${T}" y2="${H-B}" stroke="#2a7" stroke-dasharray="2 2"/>`;
+  g += `<text x="${L}" y="${H-6}" font-size="10" fill="#333">┅ Ave ${fmt(d.avg)}</text><text x="${L+140}" y="${H-6}" font-size="10" fill="#2a7">┄ Med ${fmt(d.median)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="w-full border rounded bg-white">${g}</svg>`;
+}
+
+// ステージ合計の推移
+function totalsSvg(rows) {
+  const W = 980, H = 300, L = 70, R = 16, T = 16, B = 40, colors = ["#ec4899", "#8b5cf6", "#0ea5e9"];
+  const its = rows.map(r => r.iteration), all = rows.flatMap(r => [1,2,3].map(s => r[`S${s}_total`]).filter(v => v != null));
+  if (!all.length) return "";
+  const lo = Math.min(...all), hi = Math.max(...all), x0 = Math.min(...its), x1 = Math.max(...its);
+  const x = v => L + (W - L - R) * (x1 > x0 ? (v - x0) / (x1 - x0) : .5), y = v => T + (H - T - B) * (hi > lo ? 1 - (v - lo) / (hi - lo) : .5);
+  let g = "";
+  for (let i = 0; i <= 4; i++) { const v = lo + (hi - lo) * i / 4; g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="#e2e8f0"/><text x="${L-6}" y="${y(v)+4}" font-size="11" text-anchor="end" fill="#64748b">${fmt(v)}</text>`; }
+  [x0, Math.round((x0 + x1) / 2), x1].forEach(v => g += `<text x="${x(v)}" y="${H-B+16}" font-size="11" text-anchor="middle" fill="#64748b">${v}</text>`);
+  [1, 2, 3].forEach((s, i) => {
+    const pts = rows.filter(r => r[`S${s}_total`] != null).map(r => `${x(r.iteration).toFixed(1)},${y(r[`S${s}_total`]).toFixed(1)}`).join(" ");
+    g += `<polyline points="${pts}" fill="none" stroke="${colors[i]}" stroke-width="1"/><text x="${L + 10 + i * 90}" y="${H-6}" font-size="11" fill="${colors[i]}">━ ステージ${s}</text>`;
+  });
+  g += `<text x="${W-R}" y="${H-6}" font-size="11" text-anchor="end" fill="#64748b">周回</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="w-full min-w-[720px] border rounded bg-white">${g}</svg>`;
+}
+
+function drawCharts(sid, st, rows) {
+  const used = rows.filter(r => r.status !== "flagged");
+  const hists = COLS.map(c => { const v = used.map(r => r[c]).filter(x => x != null); return v.length ? histSvg(c, v, st.columns[c]) : ""; }).join("");
+  $("#chartImgs").innerHTML = `<div><div class="text-xs font-bold mb-1">スコア分布（${st.used} 回）</div><div class="overflow-x-auto">${boxplotSvg(sid, st)}</div></div>` +
+    `<div><div class="text-xs font-bold mb-1">列ごとのヒストグラム</div><div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">${hists}</div></div>` +
+    `<div><div class="text-xs font-bold mb-1">ステージ合計の推移</div><div class="overflow-x-auto">${totalsSvg(used)}</div></div>`;
 }
 
 // ---------------- レビュー ----------------
@@ -530,14 +579,15 @@ function renderReview() {
   const head = `<tr class="bg-slate-50"><th>#</th><th>状態</th>${[1,2,3].map(s => `<th>ステージ${s}</th><th>C1</th><th>C2</th><th>C3</th><th>ボーナス</th><th>合計</th><th>検算</th>`).join("")}<th></th></tr>`;
   const cell = (r, k) => `<td><input data-it="${r.iteration}" data-k="${k}" value="${r[k] ?? ""}"></td>`;
   $("#revTable").innerHTML = head + rows.map(r => `<tr data-row="${r.iteration}">
-    <td><a class="text-pink-700 hover:underline" target="_blank" href="/api/auto/sessions/${REV.sid}/screenshot/${r.iteration}">${r.iteration}</a></td>
+    <td><button class="shotOpen text-pink-700 hover:underline" title="スクショを開く" data-it="${r.iteration}">${r.iteration}</button></td>
     <td><span class="badge ${STATUS_CLASS[r.status] || "muted"}">${STATUS_LABEL[r.status] || r.status}</span><div class="text-[10px] text-slate-400 max-w-[120px] truncate" title="${esc(r.flags)}">${esc(r.flags)}</div></td>
-    ${[1,2,3].map(s => `<td class="p-0"><img loading="lazy" class="h-14" src="/api/auto/sessions/${REV.sid}/crop/${r.iteration}/${s}"></td>${cell(r,`S${s}C1`)}${cell(r,`S${s}C2`)}${cell(r,`S${s}C3`)}${cell(r,`S${s}_bonus`)}${cell(r,`S${s}_total`)}<td class="chk text-center" data-s="${s}"></td>`).join("")}
+    ${[1,2,3].map(s => `<td class="p-0"><img loading="lazy" class="h-14 max-w-none" src="/api/auto/sessions/${REV.sid}/crop/${r.iteration}/${s}"></td>${cell(r,`S${s}C1`)}${cell(r,`S${s}C2`)}${cell(r,`S${s}C3`)}${cell(r,`S${s}_bonus`)}${cell(r,`S${s}_total`)}<td class="chk text-center" data-s="${s}"></td>`).join("")}
     <td>${r.status === "flagged" || r.status === "repaired" ? `<button class="verify text-[11px] border px-2 py-0.5 rounded hover:bg-slate-50" data-it="${r.iteration}">確認済にする</button>` : ""}</td>
   </tr>`).join("");
   document.querySelectorAll("#revTable tr[data-row]").forEach(updateCheck);
   document.querySelectorAll("#revTable input").forEach(inp => inp.oninput = () => { inp.classList.add("changed"); updateCheck(inp.closest("tr")); });
   document.querySelectorAll(".verify").forEach(b => b.onclick = async () => { await api(`/api/auto/sessions/${REV.sid}/verify/${b.dataset.it}`, {method: "POST"}); loadReview(); });
+  document.querySelectorAll(".shotOpen").forEach(b => b.onclick = () => api(`/api/auto/sessions/${REV.sid}/screenshot/${b.dataset.it}/open`, {method: "POST"}).catch(e => alert(e.message)));
 }
 function updateCheck(tr) {
   const v = k => { const i = tr.querySelector(`input[data-k="${k}"]`); return i && i.value !== "" ? +i.value.replace(/,/g, "") : null; };
@@ -554,8 +604,7 @@ $("#revSave").onclick = async () => {
   const rows = Object.values(edited);
   if (!rows.length) return alert("変更はありません");
   const r = await api(`/api/auto/sessions/${REV.sid}/rows`, {method: "POST", body: {rows}});
-  await api(`/api/auto/sessions/${REV.sid}/charts`, {method: "POST"}).catch(() => {});
-  alert(`${r.changed} 行を保存しました（統計・グラフも更新）`);
+  alert(`${r.changed} 行を保存しました（統計も更新）`);
   loadReview();
 };
 
@@ -577,7 +626,7 @@ const SETTINGS = [
   ["max_click_retries","再クリック回数","number",1],
   ["click_retry_interval_ms","再クリック間隔 (ms)","number",100],
   ["buttons.skip.brightness_min","スキップ判定の明るさ下限","number",1],
-  ["ocr.engine","読み取り方式","select",["auto","template","winocr","tesseract"]],
+  ["ocr.engine","読み取り方式","select",["auto","template","winocr"]],
   ["ocr.score_threshold","スコア二値化しきい値","number",1],
   ["ocr.total_threshold","合計二値化しきい値","number",1],
   ["lineup_threshold","編成チェックしきい値","number",1],
@@ -768,9 +817,10 @@ async function loadSessions() {
       <button class="sExtend border px-2 py-0.5 rounded" data-s="${s.id}">このセッションに追加で周回</button>
       <button class="sReocr border px-2 py-0.5 rounded" data-s="${s.id}">スクショから読み直す</button>
       <span class="text-slate-400 ml-1">CSV:</span>
-      <a class="text-pink-700 hover:underline" href="/api/auto/sessions/${s.id}/download/results">全項目</a>
-      <a class="text-pink-700 hover:underline" href="/api/auto/sessions/${s.id}/download/raw" title="ヘッダなし・1行9個（gktools のリハーサル集計にそのまま読み込める形式）">9列（gktools用）</a>
-      <a class="text-pink-700 hover:underline" href="/api/auto/sessions/${s.id}/download/stats">統計</a></td></tr>`).join("");
+      <button class="sDl text-pink-700 hover:underline" data-dl="/api/auto/sessions/${s.id}/download/results">全項目</button>
+      <button class="sDl text-pink-700 hover:underline" data-dl="/api/auto/sessions/${s.id}/download/raw" title="ヘッダなし・1行9個（gktools のリハーサル集計にそのまま読み込める形式）">9列（gktools用）</button>
+      <button class="sDl text-pink-700 hover:underline" data-dl="/api/auto/sessions/${s.id}/download/stats">統計</button></td></tr>`).join("");
+  document.querySelectorAll(".sDl").forEach(b => b.onclick = () => saveDownload(b.dataset.dl));
   document.querySelectorAll(".sReocr").forEach(b => b.onclick = async () => {
     b.disabled = true; b.textContent = "読み直し中…";
     try {
@@ -785,7 +835,7 @@ async function loadSessions() {
     $("#chartSess").textContent = "生成中…";
     const r = await api(`/api/auto/sessions/${b.dataset.s}/charts`, {method: "POST"});
     $("#chartSess").textContent = `session ${b.dataset.s}`;
-    $("#chartImgs").innerHTML = r.files.map(f => `<img class="border rounded" src="/api/auto/sessions/${b.dataset.s}/charts/${f}?t=${Date.now()}">`).join("");
+    drawCharts(b.dataset.s, r.stats, r.rows);
   });
 }
 
